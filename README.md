@@ -5,9 +5,18 @@ A from-scratch effort to decompile **Super Mario 64 DS** into matching C.
 ## Progress
 
 ```
-Functions  ████████░░░░░░░░░░░░░░░░░░░░░░  25.9%   2,950 / 11,390
-Code size  ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░   6.9%   154,436 / 2,234,028 bytes
+Functions  █████████░░░░░░░░░░░░░░░░░░░░░  30.2%   3,444 / 11,390
+Code size  ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░   8.3%   185,012 / 2,234,028 bytes
 ```
+
+Every arm-mode function in the game, drawn as a treemap. Each rectangle is one
+function sized by its byte count, green for matched and gray for unmatched, grouped
+by module.
+
+![Decompilation progress treemap](docs/progress-treemap.svg)
+
+For an interactive version where you can hover any function for its name, address,
+size, and status, see the [progress treemap on GitHub Pages](https://bmanus2-dotcom.github.io/sm64ds-decomp/).
 
 ## What "matching" means
 

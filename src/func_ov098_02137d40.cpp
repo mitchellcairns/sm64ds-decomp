@@ -1,0 +1,8 @@
+//cpp
+struct VT{ int (*f[64])(void*); };
+struct O{ VT* vt; };
+extern "C" void func_ov098_02137d40(O* c, char* o){
+    unsigned r = (*(unsigned short*)(o+0xc) == 0xce) ? 1u : 0u;
+    if(r == 0) return;
+    c->vt->f[0x7c/4](c);
+}

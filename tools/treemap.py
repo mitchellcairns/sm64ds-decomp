@@ -149,11 +149,14 @@ def _layout_row(row, rx, ry, rw, rh):
     return out
 
 
-def render(mods, out_path):
-    # Overall canvas. Modules are themselves sized by total byte mass via an
-    # outer squarify pass, so big modules dominate like WinDirStat.
-    CANVAS_W = 1600
-    CANVAS_H = 1000
+CANVAS_W = 1600
+CANVAS_H = 1000
+
+
+def build_layout(mods):
+    """Compute the squarified treemap once. Returns (regions, rects, stats)
+    where regions/rects are lists of SVG fragment strings positioned inside a
+    CANVAS_W x CANVAS_H box, and stats holds the totals both renderers print."""
     PAD = 4            # gap between module regions
     LABEL_H = 22       # header strip inside each module region
     INNER_PAD = 3      # gap between label strip and the function rects
@@ -220,6 +223,19 @@ def render(mods, out_path):
 
     fn_pct = 100.0 * total_done_n / total_n if total_n else 0.0
     by_pct = 100.0 * total_done_bytes / total_bytes if total_bytes else 0.0
+    stats = {"rect_count": rect_count, "total_done_n": total_done_n,
+             "total_n": total_n, "total_done_bytes": total_done_bytes,
+             "total_bytes": total_bytes, "fn_pct": fn_pct, "by_pct": by_pct,
+             "n_mods": len(mods)}
+    return regions, rects, stats
+
+
+def render(mods, out_path):
+    regions, rects, st = build_layout(mods)
+    rect_count = st["rect_count"]
+    total_done_n, total_n = st["total_done_n"], st["total_n"]
+    total_done_bytes, total_bytes = st["total_done_bytes"], st["total_bytes"]
+    fn_pct, by_pct = st["fn_pct"], st["by_pct"]
 
     doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -279,13 +295,48 @@ def render(mods, out_path):
     return rect_count, total_done_n, total_n, total_done_bytes, total_bytes, fn_pct, by_pct
 
 
+def render_svg(mods, out_path):
+    """Emit a standalone static .svg with a stats header baked in, suitable for
+    embedding directly in the GitHub README as an image (GitHub renders SVG but
+    runs no script, so this is a fixed snapshot with no hover tooltips)."""
+    regions, rects, st = build_layout(mods)
+    HEADER_H = 92
+    total_h = CANVAS_H + HEADER_H
+    title = "SM64DS decompilation progress"
+    line2 = (f'Functions matched: {st["total_done_n"]:,} / {st["total_n"]:,} '
+             f'({st["fn_pct"]:.2f}%)   |   '
+             f'Code bytes matched: {st["total_done_bytes"]:,} / '
+             f'{st["total_bytes"]:,} ({st["by_pct"]:.2f}%)   |   '
+             f'Modules: {st["n_mods"]}')
+    line3 = "Each rectangle is one function, sized by byte count. Green = matched, gray = unmatched."
+
+    doc = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CANVAS_W} {total_h}" \
+width="100%" font-family="Segoe UI, system-ui, sans-serif" shape-rendering="crispEdges">
+  <rect x="0" y="0" width="{CANVAS_W}" height="{total_h}" fill="{PAGE_BG}" />
+  <text x="6" y="30" font-size="24" font-weight="600" fill="{TEXT}">{html.escape(title)}</text>
+  <text x="6" y="58" font-size="15" fill="{TEXT}">{html.escape(line2)}</text>
+  <text x="6" y="80" font-size="13" fill="{SUBTEXT}">{html.escape(line3)}</text>
+  <g transform="translate(0,{HEADER_H})">
+    {''.join(regions)}
+    {''.join(rects)}
+  </g>
+</svg>
+"""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(doc, encoding="utf-8")
+    return st
+
+
 GATHER_DONE = None
 
 
 def main():
     global GATHER_DONE
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=str(REPO / "progress" / "treemap.html"))
+    ap.add_argument("--out", default=str(REPO / "progress" / "treemap.html"),
+                    help="interactive HTML output path")
+    ap.add_argument("--svg", default=None,
+                    help="also emit a standalone static SVG (for the README image)")
     args = ap.parse_args()
 
     GATHER_DONE = SW.load_done()
@@ -297,6 +348,10 @@ def main():
     print(f"  functions  : {dn:,} / {tn:,}  ({fp:.2f}%)")
     print(f"  code bytes : {db:,} / {tb:,}  ({bp:.2f}%)")
     print(f"  modules    : {len(mods)}")
+    if args.svg:
+        svg_path = pathlib.Path(args.svg)
+        render_svg(mods, svg_path)
+        print(f"wrote {svg_path}")
 
 
 if __name__ == "__main__":

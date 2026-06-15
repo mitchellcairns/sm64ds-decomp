@@ -102,6 +102,10 @@ def main():
                     help="only functions no rule shape touches (the LLM pile)")
     ap.add_argument("--easy", action="store_true",
                     help="only straight-line / single-guard funcs (high LLM hit rate)")
+    ap.add_argument("--spread", action="store_true",
+                    help="round-robin across all modules, taking each module's freshest "
+                         "(top-of-pile) funcs first -- keeps a batch in the high-hit-rate "
+                         "regime instead of draining one module into its depleted tail")
     ap.add_argument("--class", dest="klass", default=None,
                     help="only methods of this C++ class (subsystem batching)")
     ap.add_argument("--list-classes", action="store_true",
@@ -130,7 +134,25 @@ def main():
             print(f"  {n:4}  {cls}")
         return
 
-    emitted = 0
+    def emit(rec):
+        if args.pretty:
+            print(f"=== {rec['module']} {rec['name']} @ {rec['addr']} ({rec['size']}) ===")
+            if rec["self"]:
+                print(f"  signature: {rec['self']}")
+            for ln in rec["disasm"]:
+                print(ln)
+            for c in rec["callees"]:
+                print(f"  callee {c}: {rec['signatures'].get(c, '(unknown sig)')}")
+            print()
+        else:
+            print(json.dumps(rec))
+
+    # Build per-module candidate lists (sweep.funcs yields in address order, so the
+    # head of each list is that module's freshest top-of-pile). In default mode we
+    # stream module-by-module and stop at --limit; in --spread mode we round-robin
+    # across modules so a single batch skims the easy head of many modules at once.
+    buckets = {}
+    order = []
     for mod in MOD.modules():
         label = "arm9" if mod["name"] == "main" else mod["name"]
         if args.module and mod["name"] != args.module:
@@ -161,20 +183,41 @@ def main():
             rec = {"module": label, "name": name, "addr": f"0x{addr:08x}",
                    "size": f"0x{size:x}", "target_hex": tgt.hex(), "self": KB.sig_for(name, kb),
                    "callees": callees, "signatures": sigs, "pool": pool, "disasm": lines}
-            if args.pretty:
-                print(f"=== {rec['module']} {rec['name']} @ {rec['addr']} ({rec['size']}) ===")
-                if rec["self"]:
-                    print(f"  signature: {rec['self']}")
-                for ln in lines:
-                    print(ln)
-                for c in callees:
-                    print(f"  callee {c}: {sigs.get(c, '(unknown sig)')}")
-                print()
-            else:
-                print(json.dumps(rec))
-            emitted += 1
-            if args.limit and emitted >= args.limit:
+            if label not in buckets:
+                buckets[label] = []
+                order.append(label)
+            buckets[label].append(rec)
+            if not args.spread and args.limit and \
+                    sum(len(v) for v in buckets.values()) >= args.limit:
+                break
+        else:
+            continue
+        if not args.spread:
+            break
+
+    emitted = 0
+    if args.spread:
+        # round-robin: one from each module per pass, repeat until limit/exhausted
+        idx = 0
+        while True:
+            progressed = False
+            for label in order:
+                if idx < len(buckets[label]):
+                    emit(buckets[label][idx])
+                    emitted += 1
+                    progressed = True
+                    if args.limit and emitted >= args.limit:
+                        return
+            if not progressed:
                 return
+            idx += 1
+    else:
+        for label in order:
+            for rec in buckets[label]:
+                emit(rec)
+                emitted += 1
+                if args.limit and emitted >= args.limit:
+                    return
 
 
 if __name__ == "__main__":
