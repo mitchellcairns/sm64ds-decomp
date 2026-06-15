@@ -101,9 +101,11 @@ def main():
                 for name, addr, size, lbl, csrc in wins:
                     f.write(json.dumps({"addr": f"0x{addr:08x}", "name": name, "size": size,
                                         "module": label, "versions": [f"template:{lbl}"]}) + "\n")
-                    cp = SRC / f"{name}.c"
+                    is_cpp = csrc.startswith("//cpp")
+                    cp = SRC / f"{name}.{'cpp' if is_cpp else 'c'}"
                     if not cp.exists():
-                        cp.write_text(S.pretty(csrc) if " { " in csrc else csrc)
+                        cp.write_text(csrc if is_cpp else
+                                      (S.pretty(csrc) if " { " in csrc else csrc))
         if wins:
             rows.append((label, len(wins)))
             grand += len(wins)

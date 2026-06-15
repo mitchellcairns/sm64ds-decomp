@@ -225,17 +225,19 @@ def rule_load_mask(name, ins, b):
 
 
 def rule_store_const(name, ins, b):
-    # mov rX,#imm ; <store> rX,[r0(,#off)] ; bx lr   -> p[idx] = imm
+    # mov rX,#imm ; <store> rX,[rBase(,#off)] ; bx lr  -> base r0..r3 = the (n+1)th pointer arg
     if (len(ins) == 3 and ins[0].mnemonic == "mov" and ins[1].mnemonic in STORES
             and ins[2].mnemonic == "bx" and squash(ins[2].op_str) == "lr"):
         mv = re.fullmatch(r"(r\d+)," + IMM, squash(ins[0].op_str))
         if mv:
-            st = re.fullmatch(mv.group(1) + r",\[r0(?:," + IMM + r")?\]", squash(ins[1].op_str))
+            st = re.fullmatch(mv.group(1) + r",\[(r[0-3])(?:," + IMM + r")?\]", squash(ins[1].op_str))
             if st:
                 ptype, esize = STORES[ins[1].mnemonic]
-                off = int(st.group(1), 0) if st.group(1) else 0
+                off = int(st.group(2), 0) if st.group(2) else 0
+                argn = int(st.group(1)[1])
                 if off % esize == 0:
-                    return cfunc(name, "void", f"{ptype} *p",
+                    params = [f"int a{i}" for i in range(argn)] + [f"{ptype} *p"]
+                    return cfunc(name, "void", ", ".join(params),
                                  f"p[{off // esize}] = {int(mv.group(2), 0)};"), "store_const"
     return None
 
@@ -413,7 +415,7 @@ def rule_global_index(name, ins, b):
 def rule_two_global_setters(name, ins, b):
     # ldr rB,[pc] ; ldr rC,[pc] ; <store> r0,[rB] ; <store> r1,[rC] ; bx lr ; .word A ; .word B
     if len(ins) >= 5 and ins[0].mnemonic == "ldr" and ins[1].mnemonic == "ldr" \
-            and ins[2].mnemonic in STORES and ins[3].mnemonic == ins[2].mnemonic \
+            and ins[2].mnemonic in STORES and ins[3].mnemonic in STORES \
             and ins[4].mnemonic == "bx" and squash(ins[4].op_str) == "lr":
         b0 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[0].op_str))
         b1 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[1].op_str))
@@ -421,9 +423,46 @@ def rule_two_global_setters(name, ins, b):
             s0 = re.fullmatch(r"r0,\[" + b0.group(1) + r"\]", squash(ins[2].op_str))
             s1 = re.fullmatch(r"r1,\[" + b1.group(1) + r"\]", squash(ins[3].op_str))
             if s0 and s1:
-                ptype, _ = STORES[ins[2].mnemonic]
-                return (f"extern {ptype} A[]; extern {ptype} B[];\n"
+                pt0, _ = STORES[ins[2].mnemonic]
+                pt1, _ = STORES[ins[3].mnemonic]
+                return (f"extern {pt0} A[]; extern {pt1} B[];\n"
                         f"void {name}(int a, int b) {{ A[0] = a; B[0] = b; }}\n"), "two_global_setters"
+    return None
+
+
+def rule_global_swap(name, ins, b):
+    # ldr rB,[pc] ; ldr rO,[rB] ; str r0,[rB] ; mov r0,rO ; bx lr ; .word &G
+    # old = G; G = arg; return old
+    if len(ins) >= 5 and ins[0].mnemonic == "ldr" and ins[1].mnemonic == "ldr" \
+            and ins[2].mnemonic == "str" and ins[3].mnemonic == "mov" \
+            and ins[4].mnemonic == "bx" and squash(ins[4].op_str) == "lr":
+        b0 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[0].op_str))
+        if b0:
+            lo = re.fullmatch(r"(r\d+),\[" + b0.group(1) + r"\]", squash(ins[1].op_str))
+            st = re.fullmatch(r"r0,\[" + b0.group(1) + r"\]", squash(ins[2].op_str))
+            if lo and st and re.fullmatch(r"r0," + lo.group(1), squash(ins[3].op_str)):
+                return ("extern int G;\n"
+                        f"int {name}(int v) {{ int old = G; G = v; return old; }}\n"), "global_swap"
+    return None
+
+
+def rule_two_global_store_const(name, ins, b):
+    # ldr rB,[pc] ; mov rV,#k ; ldr rC,[pc] ; <store> rV,[rB] ; <store> rV,[rC] ; bx lr ; .word A,B
+    if len(ins) >= 6 and ins[0].mnemonic == "ldr" and ins[1].mnemonic == "mov" \
+            and ins[2].mnemonic == "ldr" and ins[3].mnemonic in STORES \
+            and ins[4].mnemonic == ins[3].mnemonic and ins[5].mnemonic == "bx" \
+            and squash(ins[5].op_str) == "lr":
+        b0 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[0].op_str))
+        mv = re.fullmatch(r"(r\d+)," + IMM, squash(ins[1].op_str))
+        b1 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[2].op_str))
+        if b0 and mv and b1:
+            s0 = re.fullmatch(mv.group(1) + r",\[" + b0.group(1) + r"\]", squash(ins[3].op_str))
+            s1 = re.fullmatch(mv.group(1) + r",\[" + b1.group(1) + r"\]", squash(ins[4].op_str))
+            if s0 and s1:
+                ptype, _ = STORES[ins[3].mnemonic]
+                k = int(mv.group(2), 0)
+                return (f"extern {ptype} A, B;\n"
+                        f"void {name}(void) {{ A = {k}; B = {k}; }}\n"), "two_global_store_const"
     return None
 
 
@@ -448,6 +487,29 @@ def rule_global_field_bitop(name, ins, b):
                     idx = off // lesz
                     body = f"G[{idx}] |= {imm};" if ins[2].mnemonic == "orr" else f"G[{idx}] &= ~{imm};"
                     return (f"extern {ltype} G[];\nvoid {name}(void) {{ {body} }}\n"), "global_field_bitop"
+    return None
+
+
+def rule_global_bit_test(name, ins, b):
+    # ldr rB,[pc] ; <load> r0,[rB] ; ands r0,r0,#mask ; movne r0,#a ; moveq r0,#bv ; bx ; .word &G
+    if len(ins) >= 6 and ins[0].mnemonic == "ldr" and ins[1].mnemonic in LOADS \
+            and ins[2].mnemonic == "ands" and ins[3].mnemonic == "movne" \
+            and ins[4].mnemonic == "moveq" and ins[5].mnemonic == "bx" \
+            and squash(ins[5].op_str) == "lr":
+        b0 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[0].op_str))
+        if b0:
+            ld = re.fullmatch(r"r0,\[" + b0.group(1) + r"\]", squash(ins[1].op_str))
+            a = re.fullmatch(r"r0,r0," + IMM, squash(ins[2].op_str))
+            ne = re.fullmatch(r"r0," + IMM, squash(ins[3].op_str))
+            eq = re.fullmatch(r"r0," + IMM, squash(ins[4].op_str))
+            if ld and a and ne and eq:
+                ptype = UWORD.get(ins[1].mnemonic, (LOADS[ins[1].mnemonic][0],))[0]
+                nev, eqv = int(ne.group(1), 0), int(eq.group(1), 0)
+                if {nev, eqv} == {0, 1}:
+                    op = "!=" if nev == 1 else "=="
+                    return (f"extern {ptype} G;\n"
+                            f"int {name}(void) {{ return (G & {int(a.group(1), 0)}) {op} 0; }}\n"), \
+                        "global_bit_test"
     return None
 
 
@@ -645,7 +707,1056 @@ def rule_guard_call(name, ins, b, addr, relocs, syms):
             f"    if (r == 0) return r;\n    return {c2}(t);\n}}\n"), "guard_call"
 
 
-RELOC_RULES = [rule_wrapper, rule_ctor_vtable, rule_chain_dtor, rule_guard_call]
+def rule_global_deref(name, ins, b):
+    # ldr rB,[pc] ; ldr rP,[rB] ; [add rP,rP,#big] ; <load> r0,[rP(,#off)] ; bx lr ; .word &G
+    # G is a global pointer; returns G[idx]. Trailing pool words are ignored.
+    if len(ins) < 4 or ins[0].mnemonic != "ldr" or ins[1].mnemonic != "ldr":
+        return None
+    b0 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[0].op_str))
+    if not b0:
+        return None
+    ldp = re.fullmatch(r"(r\d+),\[" + b0.group(1) + r"\]", squash(ins[1].op_str))
+    if not ldp:
+        return None
+    rP = ldp.group(1)
+    base_off, i = 0, 2
+    if ins[i].mnemonic == "add":
+        a = re.fullmatch(rP + r"," + rP + r"," + IMM, squash(ins[i].op_str))
+        if not a:
+            return None
+        base_off = int(a.group(1), 0)
+        i += 1
+    if i + 1 >= len(ins) or ins[i].mnemonic not in LOADS:
+        return None
+    if ins[i + 1].mnemonic != "bx" or squash(ins[i + 1].op_str) != "lr":
+        return None
+    m = re.fullmatch(r"r0,\[" + rP + r"(?:," + IMM + r")?\]", squash(ins[i].op_str))
+    if not m:
+        return None
+    ptype, esize = LOADS[ins[i].mnemonic]
+    off = base_off + (int(m.group(1), 0) if m.group(1) else 0)
+    if off % esize:
+        return None
+    return (f"extern {ptype} *G;\n"
+            f"int {name}(void) {{ return G[{off // esize}]; }}\n"), "global_deref"
+
+
+def _parse_obj_body(body, addr, relocs, syms):
+    # Parse a run of object-init instructions over `this` held in r4.
+    #   add r0,r4,#off / mov r0,r4          -> next call's arg offset (this+off)
+    #   bl C                                -> ('ctor', off, C)   one-arg call C(this+off)
+    #   ldr rX,[pc] ; str rX,[r4(,#voff)]   -> ('vt', voff, idx)  vtable/pool install
+    #   ldr rX,[pc] ; ldr rX,[rX] ; bl D    -> ('dealloc', off, D, gidx)  D(this+off, GLOBAL)
+    # Returns (ops, vt_count, g_count) or None. ops are in retire (instruction) order.
+    ops, pending, vt, g, pool = [], None, 0, 0, {}
+    for ii in body:
+        s = squash(ii.op_str)
+        if ii.mnemonic == "add":
+            mm = re.fullmatch(r"r0,r4," + IMM, s)
+            if not mm:
+                return None
+            pending = int(mm.group(1), 0)
+        elif ii.mnemonic == "mov" and s == "r0,r4":
+            pending = 0
+        elif ii.mnemonic == "bl":
+            e = relocs.get(addr + ii.address)
+            if not e:
+                return None
+            who = R.name_of(e[1], syms)
+            gid = next((v[1] for r, v in pool.items() if isinstance(v, tuple)), None)
+            if gid is not None:
+                pool = {r: v for r, v in pool.items() if not isinstance(v, tuple)}
+                ops.append(("dealloc", pending or 0, who, gid))
+            else:
+                ops.append(("ctor", pending or 0, who))
+            pending = None
+        elif ii.mnemonic == "ldr" and re.fullmatch(r"(r\d+),\[pc.*\]", s):
+            pool[re.fullmatch(r"(r\d+),\[pc.*\]", s).group(1)] = "raw"
+        elif ii.mnemonic == "ldr":
+            dm = re.fullmatch(r"(r\d+),\[(r\d+)\]", s)
+            if not dm or dm.group(1) != dm.group(2) or pool.get(dm.group(2)) != "raw":
+                return None
+            pool[dm.group(1)] = ("g", g)
+            g += 1
+        elif ii.mnemonic == "str":
+            sm = re.fullmatch(r"(r\d+),\[r4(?:," + IMM + r")?\]", s)
+            if not sm or pool.get(sm.group(1)) != "raw":
+                return None
+            ops.append(("vt", int(sm.group(2), 0) if sm.group(2) else 0, vt))
+            vt += 1
+            del pool[sm.group(1)]
+        else:
+            return None
+    return ops, vt, g
+
+
+def _obj_decls(ops, vt, g):
+    seen, decls = set(), ""
+    for op in ops:
+        if op[0] == "ctor" and op[2] not in seen:
+            seen.add(op[2])
+            decls += f"extern void {op[2]}(void *);\n"
+        elif op[0] == "dealloc" and op[2] not in seen:
+            seen.add(op[2])
+            decls += f"extern void {op[2]}(void *, void *);\n"
+    decls += "".join(f"extern int VT{k}[];\n" for k in range(vt))
+    decls += "".join(f"extern void *G{k};\n" for k in range(g))
+    return decls
+
+
+def _emit_obj_ops(ops, var, indent):
+    lines = ""
+    for op in ops:
+        arg = var if op[1] == 0 else f"(char *){var} + {op[1]:#x}"
+        if op[0] == "ctor":
+            lines += f"{indent}{op[2]}({arg});\n"
+        elif op[0] == "dealloc":
+            lines += f"{indent}{op[2]}({arg}, G{op[3]});\n"
+        else:
+            lhs = f"{var}[0]" if op[1] == 0 else f"*(int *)((char *){var} + {op[1]:#x})"
+            lines += f"{indent}{lhs} = (int)VT{op[2]};\n"
+    return lines
+
+
+def rule_virtual_call(name, ins, b):
+    # stmdb sp!,{lr}; sub sp,sp,#4;
+    #   <this+OFF, vtable into rV>:  ldr rV,[r0,#OFF]!   OR   add r0,r0,#OFF ; ldr rV,[r0]
+    #   mov r1,#ARG; ldr rV,[rV,#VOFF]; blx rV; mov r0,#RET; add sp,sp,#4; ldm sp!,{lr}; bx lr
+    #   -> C++ virtual dispatch: Base* b = &this->base; b->m(ARG); return RET.
+    #   The pre-indexed-writeback `ldr rV,[r0,#OFF]!` is a C++-ABI artifact C cannot emit.
+    if len(ins) < 9 or ins[0].mnemonic != "stmdb" or squash(ins[0].op_str) != "sp!,{lr}" \
+            or ins[1].mnemonic != "sub":
+        return None
+    w = re.fullmatch(r"(r\d+),\[r0," + IMM + r"\]!", squash(ins[2].op_str))
+    if w:                                              # writeback form
+        vreg, off, k = w.group(1), int(w.group(2), 0), 3
+    elif ins[2].mnemonic == "add" and re.fullmatch(r"r0,r0," + IMM, squash(ins[2].op_str)) \
+            and ins[3].mnemonic == "ldr":              # split add + load form
+        a = re.fullmatch(r"r0,r0," + IMM, squash(ins[2].op_str))
+        lv = re.fullmatch(r"(r\d+),\[r0\]", squash(ins[3].op_str))
+        if not lv:
+            return None
+        vreg, off, k = lv.group(1), int(a.group(1), 0), 4
+    else:
+        return None
+    if k + 7 > len(ins):
+        return None
+    arg = re.fullmatch(r"r1," + IMM, squash(ins[k].op_str))
+    vo = re.fullmatch(vreg + r",\[" + vreg + r"," + IMM + r"\]", squash(ins[k + 1].op_str))
+    rt = re.fullmatch(r"r0," + IMM, squash(ins[k + 3].op_str))
+    if not (arg and vo and rt and ins[k + 2].mnemonic == "blx"
+            and squash(ins[k + 2].op_str) == vreg and ins[k + 6].mnemonic == "bx"
+            and squash(ins[k + 6].op_str) == "lr"):
+        return None
+    voff = int(vo.group(1), 0)
+    if voff % 4 or off % 4:
+        return None
+    virts = "".join(f"virtual void v{i}(); " for i in range(voff // 4))
+    return ("//cpp\n"
+            f"struct Base {{ {virts}virtual void m(int); }};\n"
+            f"struct Derived {{ char pad[{off:#x}]; Base base; }};\n"
+            f'extern "C" int {name}(Derived *d) {{ Base *b = &d->base; b->m({int(arg.group(1), 0)});'
+            f" return {int(rt.group(1), 0)}; }}\n"), "virtual_call"
+
+
+def rule_pmf_call(name, ins, b):
+    # C++ pointer-to-member-function call: a PMF-array pointer at this+OFF, the (N/8)th PMF
+    #   called on this. The ARM PMF ABI:
+    #   ldr rA,[r0,#OFF]; [add r3,rA,#N]; ldr r1,[r3,#4]; add r0,r0,r1,asr#1; ands r1,r1,#1;
+    #   ldrne r2,[r0]; ldrne r1,[r3]; ldrne r1,[r2,r1]; ldreq r1,[r3]; blx r1; ...
+    if len(ins) < 13 or ins[0].mnemonic != "stmdb" or squash(ins[0].op_str) != "sp!,{lr}" \
+            or ins[1].mnemonic != "sub":
+        return None
+    lo = re.fullmatch(r"(r\d+),\[r0," + IMM + r"\]", squash(ins[2].op_str))
+    if ins[2].mnemonic != "ldr" or not lo:
+        return None
+    off, rA, k, n = int(lo.group(2), 0), lo.group(1), 3, 0
+    if ins[3].mnemonic == "add":
+        am = re.fullmatch(r"r3," + rA + r"," + IMM, squash(ins[3].op_str))
+        if not am:
+            return None
+        n, k = int(am.group(1), 0), 4
+    elif rA != "r3":
+        return None
+    if k + 10 >= len(ins):
+        return None
+    canon = [(k, "ldr", "r1,[r3,#4]"), (k + 1, "add", "r0,r0,r1,asr#1"),
+             (k + 2, "ands", "r1,r1,#1"), (k + 3, "ldrne", "r2,[r0]"),
+             (k + 4, "ldrne", "r1,[r3]"), (k + 5, "ldrne", "r1,[r2,r1]"),
+             (k + 6, "ldreq", "r1,[r3]"), (k + 7, "blx", "r1"),
+             (k + 8, "add", None), (k + 9, "ldm", "sp!,{lr}"), (k + 10, "bx", "lr")]
+    for idx, mn, exp in canon:
+        if ins[idx].mnemonic != mn or (exp is not None and squash(ins[idx].op_str) != exp):
+            return None
+    if n % 8:
+        return None
+    pexpr = "c->pp" if n == 0 else f"c->pp + {n // 8}"
+    return ("//cpp\n"
+            "struct C; typedef void (C::*PMF)();\n"
+            f"struct C {{ char pad[{off:#x}]; PMF *pp; }};\n"
+            f'extern "C" void {name}(C *c) {{ PMF *p = {pexpr}; (c->**p)(); }}\n'), "pmf_call"
+
+
+def rule_pmf_call_guarded(name, ins, b):
+    # PMF passed as arg, stored at this+OFF, null-checked, then called; returns its result (or 0).
+    #   str r1,[r0,#OFF]; ldr r3,[r0,#OFF]; ldr r2,[r3]; cmp r2,#0; <return 0 if null>;
+    #   ldr r1,[r3,#4]; add r0,r0,r1,asr#1; ands r1,r1,#1; ldrne r1,[r0]; ldrne r1,[r1,r2];
+    #   ldreq r1,[r3]; blx r1; ...
+    want = ["stmdb", "sub", "str", "ldr", "ldr", "cmp", "addeq", "moveq", "ldmeq", "bxeq",
+            "ldr", "add", "ands", "ldrne", "ldrne", "ldreq", "blx", "add", "ldm", "bx"]
+    if [i.mnemonic for i in ins[:len(want)]] != want or squash(ins[0].op_str) != "sp!,{lr}":
+        return None
+    so = re.fullmatch(r"r1,\[r0," + IMM + r"\]", squash(ins[2].op_str))
+    lo = re.fullmatch(r"r3,\[r0," + IMM + r"\]", squash(ins[3].op_str))
+    if not (so and lo and so.group(1) == lo.group(1)):
+        return None
+    canon = {4: "r2,[r3]", 5: "r2,#0", 9: "lr", 10: "r1,[r3,#4]",
+             11: "r0,r0,r1,asr#1", 12: "r1,r1,#1", 13: "r1,[r0]", 14: "r1,[r1,r2]",
+             15: "r1,[r3]", 16: "r1", 19: "lr"}
+    nret = re.fullmatch(r"r0," + IMM, squash(ins[7].op_str))      # null-path return value
+    if not nret or any(squash(ins[k].op_str) != v for k, v in canon.items()):
+        return None
+    return ("//cpp\n"
+            "struct C; typedef int (C::*PMF)();\n"
+            f"struct C {{ char pad[{int(so.group(1), 0):#x}]; PMF *pp; }};\n"
+            f'extern "C" int {name}(C *c, PMF *p) {{ c->pp = p; PMF *q = c->pp;'
+            f" if (*q == 0) return {int(nret.group(1), 0)}; return (c->**q)(); }}\n"),\
+        "pmf_call_guarded"
+
+
+def rule_pmf_table_call(name, ins, b):
+    # PMF dispatch through a global PMF table indexed by a struct field this+OFF.
+    #   [str r1,[r0,#OFF];] ldr r1,[r0,#OFF]; ldr r2,[pc](=&TABLE);
+    #   add rD,r2,r1,lsl#SH; [add r3,rD,#SUB;]  <PMF call sequence on r3>
+    #   -> (c->*TABLE[c->idx].pmf[SUB/8])();  with optional `c->idx = i;` store
+    if len(ins) < 13 or ins[0].mnemonic != "stmdb" or squash(ins[0].op_str) != "sp!,{lr}" \
+            or ins[1].mnemonic != "sub":
+        return None
+    i, store = 2, False
+    sm = re.fullmatch(r"r1,\[r0," + IMM + r"\]", squash(ins[i].op_str))
+    if ins[i].mnemonic == "str" and sm:
+        off, store, i = int(sm.group(1), 0), True, i + 1
+        lm = re.fullmatch(r"r1,\[r0," + IMM + r"\]", squash(ins[i].op_str))
+        if ins[i].mnemonic != "ldr" or not lm or int(lm.group(1), 0) != off:
+            return None
+        i += 1
+    else:
+        lm = re.fullmatch(r"r1,\[r0," + IMM + r"\]", squash(ins[i].op_str))
+        if ins[i].mnemonic != "ldr" or not lm:
+            return None
+        off, i = int(lm.group(1), 0), i + 1
+    if ins[i].mnemonic != "ldr" or not re.fullmatch(r"r2,\[pc.*\]", squash(ins[i].op_str)):
+        return None
+    i += 1
+    am = re.fullmatch(r"(r\d+),r2,r1,lsl" + IMM, squash(ins[i].op_str))
+    if ins[i].mnemonic != "add" or not am:
+        return None
+    sh, dst, i = int(am.group(2), 0), am.group(1), i + 1
+    sub = 0
+    if dst != "r3":
+        a2 = re.fullmatch(r"r3," + dst + r"," + IMM, squash(ins[i].op_str))
+        if ins[i].mnemonic != "add" or not a2:
+            return None
+        sub, i = int(a2.group(1), 0), i + 1
+    if i + 10 >= len(ins):
+        return None
+    seq = [(i, "ldr", "r1,[r3,#4]"), (i + 1, "add", "r0,r0,r1,asr#1"), (i + 2, "ands", "r1,r1,#1"),
+           (i + 3, "ldrne", "r2,[r0]"), (i + 4, "ldrne", "r1,[r3]"), (i + 5, "ldrne", "r1,[r2,r1]"),
+           (i + 6, "ldreq", "r1,[r3]"), (i + 7, "blx", "r1"), (i + 10, "bx", "lr")]
+    for idx, mn, exp in seq:
+        if ins[idx].mnemonic != mn or squash(ins[idx].op_str) != exp:
+            return None
+    esz = 1 << sh
+    if esz % 8 or sub % 8 or sub // 8 >= esz // 8:
+        return None
+    decl = ("//cpp\n"
+            "struct C; typedef void (C::*PMF)();\n"
+            f"struct Entry {{ PMF pmf[{esz // 8}]; }};\n"
+            "extern Entry TABLE[];\n"
+            f"struct C {{ char pad[{off:#x}]; int idx; }};\n")
+    call = f"(c->*TABLE[j].pmf[{sub // 8}])();"
+    if store:
+        body = f'extern "C" void {name}(C *c, int i) {{ c->idx = i; int j = c->idx; {call} }}\n'
+    else:
+        body = f'extern "C" void {name}(C *c) {{ int j = c->idx; {call} }}\n'
+    return decl + body, "pmf_table_call"
+
+
+def rule_set_fields(name, ins, b):
+    # [mov rVi,#ki | add rT,rB,#big]* with <store> rVi,[rB(,#off)] ; [mov r0,#ret] ; bx lr
+    #   -> a run of `field = const` stores at mixed widths/values; return ret if present, else void
+    if len(ins) < 3:
+        return None
+    bxj = next((j for j in range(1, len(ins))
+                if ins[j].mnemonic == "bx" and squash(ins[j].op_str) == "lr"), None)
+    if bxj is None:
+        return None
+    end, ret = bxj, None
+    if ins[bxj - 1].mnemonic == "mov":
+        rm = re.fullmatch(r"r0," + IMM, squash(ins[bxj - 1].op_str))
+        if rm:
+            end, ret = bxj - 1, int(rm.group(1), 0)
+    base, regval, fields = {"r0": 0}, {}, []
+    for ii in ins[:end]:
+        s = squash(ii.op_str)
+        if ii.mnemonic == "mov":
+            mm = re.fullmatch(r"(r\d+)," + IMM, s)
+            if not mm or mm.group(1) == "r0":     # mov r0,#k mid-body would clobber the param
+                return None
+            regval[mm.group(1)] = int(mm.group(2), 0)
+        elif ii.mnemonic == "add":
+            am = re.fullmatch(r"(r\d+),(r\d+)," + IMM, s)
+            if not am or am.group(2) not in base:
+                return None
+            base[am.group(1)] = base[am.group(2)] + int(am.group(3), 0)
+        elif ii.mnemonic in STORES:
+            sm = re.fullmatch(r"(r\d+),\[(r\d+)(?:," + IMM + r")?\]", s)
+            if not sm or sm.group(1) not in regval or sm.group(2) not in base:
+                return None
+            _, esize = STORES[ii.mnemonic]
+            off = base[sm.group(2)] + (int(sm.group(3), 0) if sm.group(3) else 0)
+            if off % esize:
+                return None
+            fields.append((off, esize, regval[sm.group(1)]))
+        else:
+            return None
+    if not fields:
+        return None
+    ty = {4: "int", 2: "short", 1: "char"}
+    lines = "".join(f"    *({ty[es]} *)(p + {off:#x}) = {val};\n" for off, es, val in fields)
+    rettype = "void" if ret is None else "int"
+    body = lines + ("" if ret is None else f"    return {ret};\n")
+    return (f"{rettype} {name}(char *p)\n{{\n{body}}}\n"), "set_fields"
+
+
+def rule_store_const_ret(name, ins, b):
+    # mov rV,#k ; <store> rV,[r0(,#off)] ; mov r0,#ret ; bx lr  -> p[idx] = k; return ret;
+    if len(ins) == 4 and ins[0].mnemonic == "mov" and ins[1].mnemonic in STORES \
+            and ins[2].mnemonic == "mov" and ins[3].mnemonic == "bx" \
+            and squash(ins[3].op_str) == "lr":
+        mv = re.fullmatch(r"(r\d+)," + IMM, squash(ins[0].op_str))
+        rt = re.fullmatch(r"r0," + IMM, squash(ins[2].op_str))
+        if mv and rt:
+            st = re.fullmatch(mv.group(1) + r",\[r0(?:," + IMM + r")?\]", squash(ins[1].op_str))
+            if st:
+                ptype, esize = STORES[ins[1].mnemonic]
+                off = int(st.group(1), 0) if st.group(1) else 0
+                if off % esize == 0:
+                    return cfunc(name, "int", f"{ptype} *p",
+                                 f"p[{off // esize}] = {int(mv.group(2), 0)}; "
+                                 f"return {int(rt.group(1), 0)};"), "store_const_ret"
+    return None
+
+
+def rule_zero_then_global_copy(name, ins, b):
+    # mov rZ,#0; ldr rB,[pc]; <store> rZ,[r0,#A]; ldr rX,[rB]; ldr rY,[rB,#4];
+    #   str rX,[r0,#D]; str rY,[r0,#D+4]; bx lr   -> *(p+A)=0; *(struct{int,int}*)(p+D)=G;
+    if len(ins) < 8 or ins[0].mnemonic != "mov" or ins[1].mnemonic != "ldr":
+        return None
+    mz = re.fullmatch(r"(r\d+),#0", squash(ins[0].op_str))
+    bp = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[1].op_str))
+    if not mz or not bp or mz.group(1) == "r0":
+        return None
+    z, rB = mz.group(1), bp.group(1)
+    sz = re.fullmatch(z + r",\[r0," + IMM + r"\]", squash(ins[2].op_str))
+    if ins[2].mnemonic not in STORES or not sz:
+        return None
+    _, zes = STORES[ins[2].mnemonic]
+    zoff = int(sz.group(1), 0)
+    lx = re.fullmatch(r"(r\d+),\[" + rB + r"\]", squash(ins[3].op_str))
+    ly = re.fullmatch(r"(r\d+),\[" + rB + r",#4\]", squash(ins[4].op_str))
+    if ins[3].mnemonic != "ldr" or ins[4].mnemonic != "ldr" or not lx or not ly:
+        return None
+    sx = re.fullmatch(lx.group(1) + r",\[r0," + IMM + r"\]", squash(ins[5].op_str))
+    sy = re.fullmatch(ly.group(1) + r",\[r0," + IMM + r"\]", squash(ins[6].op_str))
+    if ins[5].mnemonic != "str" or ins[6].mnemonic != "str" or not sx or not sy \
+            or ins[7].mnemonic != "bx" or squash(ins[7].op_str) != "lr":
+        return None
+    d0, d1 = int(sx.group(1), 0), int(sy.group(1), 0)
+    ty = {4: "int", 2: "short", 1: "char"}
+    if zoff % zes or d0 % 4 or d1 != d0 + 4:
+        return None
+    return ("struct S { int w[2]; };\nextern struct S G;\n"
+            f"void {name}(char *p) {{ *({ty[zes]} *)(p + {zoff:#x}) = 0; "
+            f"*(struct S *)(p + {d0:#x}) = G; }}\n"), "zero_then_global_copy"
+
+
+def rule_global_struct_copy(name, ins, b):
+    # ldr rB,[pc]; (ldr rXi,[rB,#i*4]) xN ; (str rXi,[r0,#base+i*4]) xN ; bx lr ; .word &G
+    #   -> *(struct{int w[N];}*)(p + base) = G   (copy an N-word global struct into a field)
+    if len(ins) < 4 or ins[0].mnemonic != "ldr":
+        return None
+    b0 = re.fullmatch(r"(r\d+),\[pc.*\]", squash(ins[0].op_str))
+    if not b0:
+        return None
+    rB = b0.group(1)
+    end = next((j for j in range(1, len(ins))
+                if ins[j].mnemonic == "bx" and squash(ins[j].op_str) == "lr"), None)
+    if end is None:
+        return None
+    mid = ins[1:end]
+    if len(mid) < 2 or len(mid) % 2:
+        return None
+    n = len(mid) // 2
+    srcreg = {}
+    for k, ld in enumerate(mid[:n]):
+        lm = re.fullmatch(r"(r\d+),\[" + rB + r"(?:," + IMM + r")?\]", squash(ld.op_str))
+        if ld.mnemonic != "ldr" or not lm:
+            return None
+        soff = int(lm.group(2), 0) if lm.group(2) else 0
+        if soff % 4 or soff // 4 != k:
+            return None
+        srcreg[lm.group(1)] = k
+    base = None
+    for k, stt in enumerate(mid[n:]):
+        sm = re.fullmatch(r"(r\d+),\[r0(?:," + IMM + r")?\]", squash(stt.op_str))
+        if stt.mnemonic != "str" or not sm or srcreg.get(sm.group(1)) != k:
+            return None
+        doff = int(sm.group(2), 0) if sm.group(2) else 0
+        if base is None:
+            base = doff
+        if base % 4 or doff != base + 4 * k:
+            return None
+    return (f"struct S {{ int w[{n}]; }};\nextern struct S G;\n"
+            f"void {name}(char *p) {{ *(struct S *)(p + {base:#x}) = G; }}\n"), "global_struct_copy"
+
+
+def rule_new_ctor(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r0,#sz; bl NEW; movs r4,r0; beq END; <obj body>; mov r0,r4; pop; bx; .word VT
+    #   -> p = new(sz); if (p) { ...ctors + vtable stores... } return p;
+    m = [i.mnemonic for i in ins]
+    if m[:1] != ["push"] or m[2:5] != ["bl", "movs", "beq"] or squash(ins[3].op_str) != "r4,r0":
+        return None
+    # size arg: either `mov r0,#sz` (small) or `ldr r0,[pc,#..]` (pool literal, non-reloc)
+    sz = re.fullmatch(r"r0," + IMM, squash(ins[1].op_str))
+    if ins[1].mnemonic == "mov" and sz:
+        size_val = int(sz.group(1), 0)
+    elif ins[1].mnemonic == "ldr":
+        lm = re.fullmatch(r"r0,\[pc,#(0x[0-9a-fA-F]+|\d+)\]", squash(ins[1].op_str))
+        if not lm:
+            return None
+        coff = ins[1].address + 8 + int(lm.group(1), 0)
+        if relocs.get(addr + coff) is not None or coff + 4 > len(b):
+            return None
+        size_val = int.from_bytes(b[coff:coff + 4], "little")
+    else:
+        return None
+    e_new = relocs.get(addr + ins[2].address)
+    if not e_new:
+        return None
+    tail = None
+    for j in range(5, len(ins) - 2):
+        if ins[j].mnemonic == "mov" and squash(ins[j].op_str) == "r0,r4" \
+                and ins[j + 1].mnemonic == "pop" and ins[j + 2].mnemonic == "bx" \
+                and squash(ins[j + 2].op_str) == "lr":
+            tail = j
+            break
+    if tail is None:
+        return None
+    parsed = _parse_obj_body(ins[5:tail], addr, relocs, syms)
+    if not parsed:
+        return None
+    ops, vt, g = parsed
+    new = R.name_of(e_new[1], syms)
+    ctors = [o[2] for o in ops if o[0] in ("ctor", "dealloc")]
+    if not ctors or name in ([new] + ctors):
+        return None
+    decls = f"extern void *{new}(unsigned);\n" + _obj_decls(ops, vt, g)
+    lines = _emit_obj_ops(ops, "p", "        ")
+    return (decls +
+            f"int *{name}(void)\n{{\n    int *p = (int *){new}({size_val});\n"
+            f"    if (p) {{\n{lines}    }}\n    return p;\n}}\n"), "new_ctor"
+
+
+def rule_dtor_vtable(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; ...; mov r4,r0; <obj body with >=1 vtable install>; mov r0,r4; pop; bx; .word VT
+    #   -> install vtable(s) into this, call dtors on this(+off), return this.
+    #   The `mov r4,r0` may sit after hoisted `ldr rX,[pc]` pool loads, so find it by scan.
+    if len(ins) < 6 or ins[0].mnemonic != "push":
+        return None
+    tail = None
+    for j in range(2, len(ins) - 2):
+        if ins[j].mnemonic == "mov" and squash(ins[j].op_str) == "r0,r4" \
+                and ins[j + 1].mnemonic == "pop" and ins[j + 2].mnemonic == "bx" \
+                and squash(ins[j + 2].op_str) == "lr":
+            tail = j
+            break
+    if tail is None:
+        return None
+    mv = next((j for j in range(1, tail) if ins[j].mnemonic == "mov"
+               and squash(ins[j].op_str) == "r4,r0"), None)
+    if mv is None:
+        return None
+    parsed = _parse_obj_body([ins[j] for j in range(1, tail) if j != mv], addr, relocs, syms)
+    if not parsed:
+        return None
+    ops, vt, g = parsed
+    dtors = [o[2] for o in ops if o[0] in ("ctor", "dealloc")]
+    if vt == 0 or name in dtors:        # vt==0 is plain chain_dtor's job
+        return None
+    lines = _emit_obj_ops(ops, "t", "    ")
+    return (_obj_decls(ops, vt, g) +
+            f"int *{name}(int *t)\n{{\n{lines}    return t;\n}}\n"), "dtor_vtable"
+
+
+def rule_frame_call_const(name, ins, b, addr, relocs, syms):
+    # stmdb sp!,{lr}; sub sp,sp,#k; [ (ldr r0,[pc])? bl Ci ]+ ; mov r0,#ret;
+    #   add sp,sp,#k; ldm sp!,{lr}; bx lr; .word G...
+    #   -> call each Ci (on a pool global, or on the incoming this), return constant
+    if len(ins) < 6 or ins[0].mnemonic != "stmdb" or squash(ins[0].op_str) != "sp!,{lr}" \
+            or ins[1].mnemonic != "sub":
+        return None
+    subm = re.fullmatch(r"sp,sp," + IMM, squash(ins[1].op_str))
+    if not subm:
+        return None
+    tail = ret = None
+    for j in range(2, len(ins) - 3):
+        if ins[j].mnemonic == "mov" and ins[j + 1].mnemonic == "add" \
+                and ins[j + 2].mnemonic == "ldm" and ins[j + 3].mnemonic == "bx" \
+                and squash(ins[j + 3].op_str) == "lr" and squash(ins[j + 2].op_str) == "sp!,{lr}":
+            rm = re.fullmatch(r"r0," + IMM, squash(ins[j].op_str))
+            am = re.fullmatch(r"sp,sp," + IMM, squash(ins[j + 1].op_str))
+            if rm and am and am.group(1) == subm.group(1):
+                tail, ret = j, int(rm.group(1), 0)
+                break
+    if tail is None:
+        return None
+    calls, gi, pglob, poff = [], 0, False, None
+    for ii in ins[2:tail]:
+        s = squash(ii.op_str)
+        if ii.mnemonic == "ldr" and re.fullmatch(r"r0,\[pc.*\]", s):
+            pglob = True
+        elif ii.mnemonic == "add" and re.fullmatch(r"r0,r0," + IMM, s):
+            poff = int(re.fullmatch(r"r0,r0," + IMM, s).group(1), 0)
+        elif ii.mnemonic == "bl":
+            e = relocs.get(addr + ii.address)
+            if not e:
+                return None
+            nm = R.name_of(e[1], syms)
+            if pglob:
+                calls.append((nm, "g", gi))
+                gi += 1
+            elif poff is not None:
+                calls.append((nm, "o", poff))
+            else:
+                calls.append((nm, "t", None))
+            pglob, poff = False, None
+        else:
+            return None
+    if not calls or name in (c for c, _, _ in calls):
+        return None
+    use_this = any(k in ("t", "o") for _, k, _ in calls)
+
+    def _arg(k, v):
+        return "t" if k == "t" else (f"(char *)t + {v:#x}" if k == "o" else f"G{v}")
+    decls = "".join(f"extern void {c}(void *);\n" for c in dict.fromkeys(c for c, _, _ in calls))
+    decls += "".join(f"extern int G{k}[];\n" for k in range(gi))
+    lines = "".join(f"    {c}({_arg(k, v)});\n" for c, k, v in calls)
+    params = "void *t" if use_this else "void"
+    return (decls + f"int {name}({params})\n{{\n{lines}    return {ret};\n}}\n"), "frame_call_const"
+
+
+def rule_frame_call_bool(name, ins, b, addr, relocs, syms):
+    # stmdb sp!,{lr}; sub sp,sp,#k; [ldr r0,[pc] | add r0,r0,#off]? bl X; cmp r0,#0;
+    #   movne r0,#1; moveq r0,#0; add sp,sp,#k; ldm sp!,{lr}; bx lr  -> return X(arg) != 0;
+    if len(ins) < 9 or ins[0].mnemonic != "stmdb" or squash(ins[0].op_str) != "sp!,{lr}" \
+            or ins[1].mnemonic != "sub":
+        return None
+    subm = re.fullmatch(r"sp,sp," + IMM, squash(ins[1].op_str))
+    if not subm:
+        return None
+    k, arg = 2, ("t", None)
+    if ins[k].mnemonic == "ldr" and re.fullmatch(r"r0,\[pc.*\]", squash(ins[k].op_str)):
+        arg, k = ("g", 0), k + 1
+    elif ins[k].mnemonic == "add" and re.fullmatch(r"r0,r0," + IMM, squash(ins[k].op_str)):
+        arg = ("o", int(re.fullmatch(r"r0,r0," + IMM, squash(ins[k].op_str)).group(1), 0))
+        k += 1
+    seq = [ins[k + i].mnemonic for i in range(7)] if k + 7 <= len(ins) else []
+    if seq != ["bl", "cmp", "movne", "moveq", "add", "ldm", "bx"]:
+        return None
+    if squash(ins[k + 1].op_str) != "r0,#0" or squash(ins[k + 2].op_str) != "r0,#1" \
+            or squash(ins[k + 3].op_str) != "r0,#0" or squash(ins[k + 6].op_str) != "lr" \
+            or squash(ins[k + 5].op_str) != "sp!,{lr}" \
+            or re.fullmatch(r"sp,sp," + IMM, squash(ins[k + 4].op_str)).group(1) != subm.group(1):
+        return None
+    e = relocs.get(addr + ins[k].address)
+    if not e:
+        return None
+    X = R.name_of(e[1], syms)
+    if name == X:
+        return None
+    kind, v = arg
+    a = "t" if kind == "t" else (f"(char *)t + {v:#x}" if kind == "o" else "G")
+    decls = f"extern int {X}(void *);\n" + ("extern int G[];\n" if kind == "g" else "")
+    params = "void" if kind == "g" else "void *t"
+    return (decls + f"int {name}({params}) {{ return {X}({a}) != 0; }}\n"), "frame_call_bool"
+
+
+def rule_deleting_dtor(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; ldr r1,[pc]; mov r4,r0; str r1,[r4]; bl D1; ldr r1,[pc]; mov r0,r4;
+    #   ldr r1,[r1]; bl D2; mov r0,r4; pop; bx; .word VT, &HEAP
+    #   -> this[0] = &VT; D1(this); D2(this, HEAP); return this;
+    m = [i.mnemonic for i in ins]
+    if m[:12] != ["push", "ldr", "mov", "str", "bl", "ldr", "mov", "ldr", "bl", "mov", "pop", "bx"]:
+        return None
+    s = lambda k: squash(ins[k].op_str)
+    if not (re.fullmatch(r"r1,\[pc.*\]", s(1)) and s(2) == "r4,r0" and s(3) == "r1,[r4]"
+            and re.fullmatch(r"r1,\[pc.*\]", s(5)) and s(6) == "r0,r4"
+            and s(7) == "r1,[r1]" and s(9) == "r0,r4" and s(11) == "lr"):
+        return None
+    e1, e2 = relocs.get(addr + ins[4].address), relocs.get(addr + ins[8].address)
+    if not (e1 and e2):
+        return None
+    d1, d2 = R.name_of(e1[1], syms), R.name_of(e2[1], syms)
+    if d1 == d2 or name in (d1, d2):
+        return None
+    decls = (f"extern int VT[];\nextern void {d1}(void *);\n"
+             f"extern void {d2}(void *, void *);\nextern void *HEAP;\n")
+    return (decls + f"int *{name}(int *t)\n{{\n    t[0] = (int)VT;\n    {d1}(t);\n"
+            f"    {d2}(t, HEAP);\n    return t;\n}}\n"), "deleting_dtor"
+
+
+def rule_call_scale_fields(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r4,r0; ldrsh r1,[r4,#A]; add r0,r4,#B (or mov r0,r4); bl F;
+    #   (ldr r0,[r4,#Si]; asr r0,r0,#sh; str r0,[r4,#Di]) xN ; pop{r4,lr}; bx lr
+    #   -> F(t+B, *(short*)(t+A)); t->Di = t->Si >> sh; ...
+    if len(ins) < 6 or ins[0].mnemonic != "push" or ins[1].mnemonic != "mov" \
+            or squash(ins[1].op_str) != "r4,r0" or ins[2].mnemonic != "ldrsh":
+        return None
+    # collect consecutive ldrsh into r1, r2, r3, ... (the call's short args)
+    shorts, k = [], 2
+    while k < len(ins) and ins[k].mnemonic == "ldrsh":
+        lm = re.fullmatch(r"r" + str(len(shorts) + 1) + r",\[r4(?:," + IMM + r")?\]",
+                          squash(ins[k].op_str))
+        if not lm:
+            break
+        shorts.append(int(lm.group(1), 0) if lm.group(1) else 0)
+        k += 1
+    if not shorts:
+        return None
+    if ins[k].mnemonic == "add":
+        am = re.fullmatch(r"r0,r4," + IMM, squash(ins[k].op_str))
+        if not am:
+            return None
+        B = int(am.group(1), 0)
+    elif ins[k].mnemonic == "mov" and squash(ins[k].op_str) == "r0,r4":
+        B = 0
+    else:
+        return None
+    k += 1
+    if k >= len(ins) or ins[k].mnemonic != "bl":
+        return None
+    e = relocs.get(addr + ins[k].address)
+    if not e:
+        return None
+    F = R.name_of(e[1], syms)
+    start = k + 1
+    end = next((j for j in range(start, len(ins) - 1) if ins[j].mnemonic == "pop"
+                and ins[j + 1].mnemonic == "bx" and squash(ins[j + 1].op_str) == "lr"), None)
+    if end is None or name == F:
+        return None
+    body = ins[start:end]
+    if not body or len(body) % 3:
+        return None
+    triples = []
+    for k in range(0, len(body), 3):
+        ld, sh, st = body[k], body[k + 1], body[k + 2]
+        lm = re.fullmatch(r"r0,\[r4(?:," + IMM + r")?\]", squash(ld.op_str))
+        sm = re.fullmatch(r"r0,r0," + IMM, squash(sh.op_str))
+        tm = re.fullmatch(r"r0,\[r4(?:," + IMM + r")?\]", squash(st.op_str))
+        if ld.mnemonic != "ldr" or sh.mnemonic != "asr" or st.mnemonic != "str" \
+                or not (lm and sm and tm):
+            return None
+        triples.append((int(tm.group(1), 0) if tm.group(1) else 0,
+                        int(lm.group(1), 0) if lm.group(1) else 0, int(sm.group(1), 0)))
+    arg0 = "t" if B == 0 else f"t + {B:#x}"
+    shortargs = "".join(f", *(short *)(t + {A:#x})" for A in shorts)
+    lines = f"    {F}({arg0}{shortargs});\n"
+    for Di, Si, sh in triples:
+        lines += f"    *(int *)(t + {Di:#x}) = *(int *)(t + {Si:#x}) >> {sh};\n"
+    fparams = "void *" + "".join(", int" for _ in shorts)
+    return (f"extern void {F}({fparams});\n"
+            f"void {name}(char *t)\n{{\n{lines}}}\n"), "call_scale_fields"
+
+
+def rule_two_call_wrapper(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r4,r0; bl X; mov r0,r4; [mov r1,#k;] bl Y; pop{r4,lr}; bx lr
+    #   -> X(this); Y(this[, k]);   (the second call's int arg is optional)
+    if ins[:2] == [] or ins[0].mnemonic != "push" or squash(ins[1].op_str) != "r4,r0" \
+            or ins[2].mnemonic != "bl" or squash(ins[3].op_str) != "r0,r4":
+        return None
+    if ins[4].mnemonic == "mov":                       # X(this); Y(this, k)
+        kk = re.fullmatch(r"r1," + IMM, squash(ins[4].op_str))
+        yi, arg = 5, kk
+    else:                                              # X(this); Y(this)
+        kk, yi, arg = None, 4, True
+    if not arg or len(ins) < yi + 3 or ins[yi].mnemonic != "bl" \
+            or ins[yi + 1].mnemonic != "pop" or squash(ins[yi + 2].op_str) != "lr":
+        return None
+    e1, e2 = relocs.get(addr + ins[2].address), relocs.get(addr + ins[yi].address)
+    if not (e1 and e2):
+        return None
+    X, Y = R.name_of(e1[1], syms), R.name_of(e2[1], syms)
+    if X == Y or name in (X, Y):
+        return None
+    if kk:
+        return (f"extern void {X}(void *);\nextern void {Y}(void *, int);\n"
+                f"void {name}(void *t)\n{{\n    {X}(t);\n    {Y}(t, {int(kk.group(1), 0)});\n}}\n"),\
+            "two_call_wrapper"
+    return (f"extern void {X}(void *);\nextern void {Y}(void *);\n"
+            f"void {name}(void *t)\n{{\n    {X}(t);\n    {Y}(t);\n}}\n"), "two_call_wrapper"
+
+
+def rule_indexed_inc(name, ins, b, addr, relocs, syms):
+    # ldr rB,[pc]; add rB,r0,rB; ldr r0,[rB,r1,lsl#2]; add r0,r0,#1; str r0,[rB,r1,lsl#2]; bx; .word G
+    #   -> int *a = (int *)(p + G); a[i] = a[i] + 1;   (G is a non-reloc field offset)
+    if [i.mnemonic for i in ins[:6]] != ["ldr", "add", "ldr", "add", "str", "bx"] \
+            or squash(ins[5].op_str) != "lr":
+        return None
+    b0 = re.fullmatch(r"(r\d+),\[pc,#(0x[0-9a-fA-F]+|\d+)\]", squash(ins[0].op_str))
+    if not b0:
+        return None
+    rB = b0.group(1)
+    if squash(ins[1].op_str) != f"{rB},r0,{rB}" or squash(ins[2].op_str) != f"r0,[{rB},r1,lsl#2]" \
+            or squash(ins[3].op_str) != "r0,r0,#1" or squash(ins[4].op_str) != f"r0,[{rB},r1,lsl#2]":
+        return None
+    coff = ins[0].address + 8 + int(b0.group(2), 0)
+    if relocs.get(addr + coff) is not None or coff + 4 > len(b):
+        return None
+    G = int.from_bytes(b[coff:coff + 4], "little")
+    return (f"void {name}(char *p, int i)\n{{\n    int *a = (int *)(p + {G});\n"
+            f"    a[i] = a[i] + 1;\n}}\n"), "indexed_inc"
+
+
+def rule_frame_call_globals(name, ins, b, addr, relocs, syms):
+    # stmdb sp!,{lr}; sub sp,sp,#k; [ (ldr rArg,[pc])+ bl F ]+ ; add sp,sp,#k; ldm sp!,{lr}; bx lr
+    #   each F(args) with args loaded from pool: reloc slot -> extern global, else a literal const
+    if len(ins) < 5 or ins[0].mnemonic != "stmdb" or squash(ins[0].op_str) != "sp!,{lr}" \
+            or ins[1].mnemonic != "sub":
+        return None
+    subm = re.fullmatch(r"sp,sp," + IMM, squash(ins[1].op_str))
+    if not subm:
+        return None
+    end = None
+    for j in range(2, len(ins) - 2):
+        if ins[j].mnemonic == "add" and ins[j + 1].mnemonic == "ldm" \
+                and ins[j + 2].mnemonic == "bx" and squash(ins[j + 2].op_str) == "lr" \
+                and squash(ins[j + 1].op_str) == "sp!,{lr}":
+            am = re.fullmatch(r"sp,sp," + IMM, squash(ins[j].op_str))
+            if am and am.group(1) == subm.group(1):
+                end = j
+                break
+    if end is None:
+        return None
+    calls, pending, expect, gmap = [], [], 0, {}
+    for ii in ins[2:end]:
+        s = squash(ii.op_str)
+        lm = re.fullmatch(r"r(\d+),\[pc,#(0x[0-9a-fA-F]+|\d+)\]", s)
+        if ii.mnemonic == "ldr" and lm:
+            if int(lm.group(1)) != expect:
+                return None
+            coff = ii.address + 8 + int(lm.group(2), 0)
+            if coff + 4 > len(b):
+                return None
+            r = relocs.get(addr + coff)
+            if r is not None:
+                key = tuple(r[1:])                 # dedup globals by reloc target identity
+                if key not in gmap:
+                    gmap[key] = len(gmap)
+                pending.append(("g", gmap[key]))
+            else:
+                w = int.from_bytes(b[coff:coff + 4], "little")
+                pending.append(("c", w - (1 << 32) if w >= (1 << 31) else w))
+            expect += 1
+        elif ii.mnemonic == "bl":
+            e = relocs.get(addr + ii.address)
+            if not e or not pending:
+                return None
+            calls.append((R.name_of(e[1], syms), pending))
+            pending, expect = [], 0
+        else:
+            return None
+    if not calls or pending:
+        return None
+    fnames = dict.fromkeys(c[0] for c in calls)
+    if name in fnames:
+        return None
+    decls = "".join(f"extern void {f}();\n" for f in fnames)
+    decls += "".join(f"extern int G{k}[];\n" for k in range(len(gmap)))
+    lines = "".join(
+        f"    {f}({', '.join(f'G{a[1]}' if a[0] == 'g' else str(a[1]) for a in args)});\n"
+        for f, args in calls)
+    return (decls + f"void {name}(void)\n{{\n{lines}}}\n"), "frame_call_globals"
+
+
+def rule_guarded_call_block(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r4,r0; [arg] bl G; cmp r0,#0; beq END;
+    #   ( [arg] bl Ci )* ; END: mov r0,#ret; pop{r4,lr}; bx lr
+    #   -> if (G(arg)) { Ci(arg); ... } return ret;  (arg = this / this+off / pool global)
+    if len(ins) < 7 or ins[0].mnemonic != "push" or ins[1].mnemonic != "mov" \
+            or squash(ins[1].op_str) != "r4,r0":
+        return None
+    end = ret = None
+    for j in range(2, len(ins) - 2):
+        if ins[j].mnemonic == "mov" and ins[j + 1].mnemonic == "pop" \
+                and ins[j + 2].mnemonic == "bx" and squash(ins[j + 2].op_str) == "lr":
+            rm = re.fullmatch(r"r0," + IMM, squash(ins[j].op_str))
+            if rm:
+                end, ret = j, int(rm.group(1), 0)
+                break
+    if end is None:
+        return None
+    body, glob = ins[2:end], [0]
+
+    def arg_at(i):
+        if i >= len(body):
+            return None
+        ii = body[i]
+        s = squash(ii.op_str)
+        if ii.mnemonic == "add":
+            mm = re.fullmatch(r"r0,r4," + IMM, s)
+            return (f"(char *)t + {int(mm.group(1), 0):#x}", i + 1) if mm else None
+        if ii.mnemonic == "mov" and s == "r0,r4":
+            return "t", i + 1
+        if ii.mnemonic == "ldr" and re.fullmatch(r"r0,\[pc.*\]", s):
+            g = glob[0]
+            glob[0] += 1
+            return f"G{g}", i + 1
+        return "t", i
+
+    ga = arg_at(0)
+    if not ga:
+        return None
+    gexpr, i = ga
+    if i >= len(body) or body[i].mnemonic != "bl":
+        return None
+    ge = relocs.get(addr + body[i].address)
+    if not ge:
+        return None
+    Gname = R.name_of(ge[1], syms)
+    i += 1
+    if i + 1 >= len(body) or body[i].mnemonic != "cmp" or squash(body[i].op_str) != "r0,#0" \
+            or body[i + 1].mnemonic != "beq":
+        return None
+    bt = int(squash(body[i + 1].op_str).lstrip("#"), 0)   # beq target = end of the if-block
+    i += 2
+    guarded, after = [], []
+    while i < len(body):
+        aa = arg_at(i)
+        if not aa:
+            return None
+        aexpr, ni = aa
+        if ni >= len(body) or body[ni].mnemonic != "bl":
+            return None
+        e = relocs.get(addr + body[ni].address)
+        if not e:
+            return None
+        (guarded if body[ni].address < bt else after).append((R.name_of(e[1], syms), aexpr))
+        i = ni + 1
+    if not guarded or name in ([Gname] + [c for c, _ in guarded + after]):
+        return None
+    decls = f"extern int {Gname}(void *);\n"
+    for c in dict.fromkeys(c for c, _ in guarded + after):
+        if c != Gname:
+            decls += f"extern void {c}(void *);\n"
+    decls += "".join(f"extern int G{k}[];\n" for k in range(glob[0]))
+    gblock = "".join(f"        {c}({a});\n" for c, a in guarded)
+    ablock = "".join(f"    {c}({a});\n" for c, a in after)
+    return (decls + f"int {name}(void *t)\n{{\n    if ({Gname}({gexpr})) {{\n{gblock}    }}\n"
+            f"{ablock}    return {ret};\n}}\n"), "guarded_call_block"
+
+
+def _parse_method_body(body, addr, relocs, syms):
+    # `this` in r4. Ops in instruction order:
+    #   mov rV,#k ; <store> rV,[r4,#off]      -> ('set', off, esize, k, 'c')   field = const
+    #   ldr rV,[pc] ; <store> rV,[r4,#off]    -> ('set', off, esize, gidx,'g') field = &global
+    #   add r0,r4,#off | mov r0,r4 ; bl X     -> ('call', off, X)              X(this+off)
+    regval, pending, g, ops = {}, None, 0, []
+    for ii in body:
+        s, mn = squash(ii.op_str), ii.mnemonic
+        if mn == "add":
+            mm = re.fullmatch(r"r0,r4," + IMM, s)
+            if not mm:
+                return None
+            pending = int(mm.group(1), 0)
+        elif mn == "mov" and s == "r0,r4":
+            pending = 0
+        elif mn == "mov":
+            mm = re.fullmatch(r"(r\d+)," + IMM, s)
+            if not mm:
+                return None
+            regval[mm.group(1)] = ("c", int(mm.group(2), 0))
+        elif mn == "ldr" and re.fullmatch(r"(r\d+),\[pc.*\]", s):
+            regval[re.fullmatch(r"(r\d+),\[pc.*\]", s).group(1)] = ("g", g)
+            g += 1
+        elif mn in STORES:
+            sm = re.fullmatch(r"(r\d+),\[r4(?:," + IMM + r")?\]", s)
+            if not sm or sm.group(1) not in regval:
+                return None
+            _, esize = STORES[mn]
+            off = int(sm.group(2), 0) if sm.group(2) else 0
+            if off % esize:
+                return None
+            kind, v = regval[sm.group(1)]
+            ops.append(("set", off, esize, v, kind))
+        elif mn == "bl":
+            e = relocs.get(addr + ii.address)
+            if not e:
+                return None
+            ops.append(("call", pending or 0, R.name_of(e[1], syms)))
+            pending = None
+        else:
+            return None
+    return ops, g
+
+
+def rule_method_body(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r4,r0; <field sets + calls on this(+off)>; (mov r0,#RET | mov r0,r4); pop; bx
+    if len(ins) < 5 or ins[0].mnemonic != "push" or ins[1].mnemonic != "mov" \
+            or squash(ins[1].op_str) != "r4,r0":
+        return None
+    tail = ret = None
+    retthis = False
+    for j in range(2, len(ins) - 2):
+        if ins[j].mnemonic == "mov" and ins[j + 1].mnemonic == "pop" \
+                and ins[j + 2].mnemonic == "bx" and squash(ins[j + 2].op_str) == "lr":
+            rm = re.fullmatch(r"r0," + IMM, squash(ins[j].op_str))
+            if rm:
+                tail, ret = j, int(rm.group(1), 0)
+                break
+            if squash(ins[j].op_str) == "r0,r4":
+                tail, retthis = j, True
+                break
+    if tail is None:
+        return None
+    parsed = _parse_method_body(ins[2:tail], addr, relocs, syms)
+    if not parsed:
+        return None
+    ops, g = parsed
+    calls = [o[2] for o in ops if o[0] == "call"]
+    if not calls or not any(o[0] == "set" for o in ops) or name in calls:
+        return None
+    ty = {4: "int", 2: "short", 1: "char"}
+    decls = "".join(f"extern void {c}(void *);\n" for c in dict.fromkeys(calls))
+    decls += "".join(f"extern int G{k}[];\n" for k in range(g))
+    lines = ""
+    for op in ops:
+        if op[0] == "call":
+            arg = "c" if op[1] == 0 else f"(char *)c + {op[1]:#x}"
+            lines += f"    {op[2]}({arg});\n"
+        else:
+            _, off, esize, v, kind = op
+            rhs = f"(int)G{v}" if kind == "g" else str(v)
+            lines += f"    *({ty[esize]} *)(c + {off:#x}) = {rhs};\n"
+    if retthis:
+        return decls + f"int *{name}(char *c)\n{{\n{lines}    return (int *)c;\n}}\n", "method_body"
+    return decls + f"int {name}(char *c)\n{{\n{lines}    return {ret};\n}}\n", "method_body"
+
+
+def rule_guard_load_call(name, ins, b, addr, relocs, syms):
+    # stmdb sp!,{lr}; sub sp,sp,#k; ldr r0,[r0]; cmp r0,#0; <return if null>;
+    #   ldrb r0,[r0,#OFF]; bl F; add sp; ldm; bx   -> p = *c; if (p) F(p[OFF]);
+    want = ["stmdb", "sub", "ldr", "cmp", "addeq", "ldmeq", "bxeq", "ldrb", "bl", "add", "ldm", "bx"]
+    if [i.mnemonic for i in ins[:12]] != want or squash(ins[0].op_str) != "sp!,{lr}":
+        return None
+    lb = re.fullmatch(r"r0,\[r0," + IMM + r"\]", squash(ins[7].op_str))
+    if squash(ins[2].op_str) != "r0,[r0]" or squash(ins[3].op_str) != "r0,#0" \
+            or squash(ins[6].op_str) != "lr" or not lb or squash(ins[11].op_str) != "lr":
+        return None
+    e = relocs.get(addr + ins[8].address)
+    if not e:
+        return None
+    f = R.name_of(e[1], syms)
+    if name == f:
+        return None
+    return (f"extern void {f}(int);\n"
+            f"void {name}(char **c) {{ unsigned char *p = (unsigned char *)*c;"
+            f" if (p) {f}(p[{int(lb.group(1), 0):#x}]); }}\n"), "guard_load_call"
+
+
+def rule_fixed5_wrapper(name, ins, b, addr, relocs, syms):
+    # stmdb sp!,{lr}; sub sp,sp,#k; mov r2,#0; mov r1,r0; mov r3,r2; mov r0,#K; str r2,[sp];
+    #   bl F; add sp; ldm; bx   -> F(K, this, 0, 0, 0);
+    want = ["stmdb", "sub", "mov", "mov", "mov", "mov", "str", "bl", "add", "ldm", "bx"]
+    if [i.mnemonic for i in ins[:11]] != want or squash(ins[0].op_str) != "sp!,{lr}":
+        return None
+    k = re.fullmatch(r"r0," + IMM, squash(ins[5].op_str))
+    if squash(ins[2].op_str) != "r2,#0" or squash(ins[3].op_str) != "r1,r0" \
+            or squash(ins[4].op_str) != "r3,r2" or not k or squash(ins[6].op_str) != "r2,[sp]" \
+            or squash(ins[10].op_str) != "lr":
+        return None
+    e = relocs.get(addr + ins[7].address)
+    if not e:
+        return None
+    f = R.name_of(e[1], syms)
+    if name == f:
+        return None
+    return (f"extern void {f}(int, void *, int, int, int);\n"
+            f"void {name}(void *c) {{ {f}({int(k.group(1), 0)}, c, 0, 0, 0); }}\n"), "fixed5_wrapper"
+
+
+def rule_call_then_virtual(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r4,r0; mov r0,r1; bl X; mov r0,r4; ldr r1,[r0]; ldr r1,[r1,#VOFF]; blx r1; pop; bx
+    #   -> X(arg1); c->m();   (X is a reloc bl callee; m is a C++ virtual at vtable+VOFF)
+    if [i.mnemonic for i in ins[:10]] != ["push", "mov", "mov", "bl", "mov", "ldr", "ldr",
+                                          "blx", "pop", "bx"]:
+        return None
+    vo = re.fullmatch(r"r1,\[r1," + IMM + r"\]", squash(ins[6].op_str))
+    if squash(ins[1].op_str) != "r4,r0" or squash(ins[2].op_str) != "r0,r1" \
+            or squash(ins[4].op_str) != "r0,r4" or squash(ins[5].op_str) != "r1,[r0]" \
+            or not vo or squash(ins[7].op_str) != "r1" or squash(ins[9].op_str) != "lr":
+        return None
+    e = relocs.get(addr + ins[3].address)
+    if not e:
+        return None
+    x, voff = R.name_of(e[1], syms), int(vo.group(1), 0)
+    if name == x or voff % 4:
+        return None
+    virts = "".join(f"virtual void v{i}(); " for i in range(voff // 4))
+    return ("//cpp\n"
+            f"struct Base {{ {virts}virtual void m(); }};\n"
+            f'extern "C" void {x}(int);\n'
+            f'extern "C" void {name}(Base *c, int a) {{ {x}(a); c->m(); }}\n'), "call_then_virtual"
+
+
+def rule_call2_then_virtual(name, ins, b, addr, relocs, syms):
+    # push{r4,lr}; mov r4,r0; add r0,r4,#A; add r1,r4,#B; bl X; add r0,r4,#OFF; ldr r2,[r0];
+    #   mov r1,#ARG; ldr r2,[r2,#VOFF]; blx r2; mov r0,#RET; pop; bx
+    #   -> X(this+A, this+B); Sub* b = &this->sub; b->m(ARG); return RET;
+    want = ["push", "mov", "add", "add", "bl", "add", "ldr", "mov", "ldr", "blx", "mov", "pop", "bx"]
+    if [i.mnemonic for i in ins[:13]] != want or squash(ins[1].op_str) != "r4,r0":
+        return None
+    a0 = re.fullmatch(r"r0,r4," + IMM, squash(ins[2].op_str))
+    a1 = re.fullmatch(r"r1,r4," + IMM, squash(ins[3].op_str))
+    a2 = re.fullmatch(r"r0,r4," + IMM, squash(ins[5].op_str))
+    arg = re.fullmatch(r"r1," + IMM, squash(ins[7].op_str))
+    vo = re.fullmatch(r"r2,\[r2," + IMM + r"\]", squash(ins[8].op_str))
+    rt = re.fullmatch(r"r0," + IMM, squash(ins[10].op_str))
+    if not (a0 and a1 and a2 and arg and vo and rt) or squash(ins[6].op_str) != "r2,[r0]" \
+            or squash(ins[9].op_str) != "r2" or squash(ins[12].op_str) != "lr":
+        return None
+    e = relocs.get(addr + ins[4].address)
+    if not e:
+        return None
+    x, voff = R.name_of(e[1], syms), int(vo.group(1), 0)
+    if name == x or voff % 4:
+        return None
+    virts = "".join(f"virtual void v{i}(); " for i in range(voff // 4))
+    return ("//cpp\n"
+            f"struct Sub {{ {virts}virtual void m(int); }};\n"
+            f"struct Base {{ char pad[{int(a2.group(1), 0):#x}]; Sub sub; }};\n"
+            f'extern "C" void {x}(void *, void *);\n'
+            f'extern "C" int {name}(Base *c) {{ {x}((char *)c + {int(a0.group(1), 0):#x}, '
+            f"(char *)c + {int(a1.group(1), 0):#x}); Sub *b = &c->sub; b->m({int(arg.group(1), 0)});"
+            f" return {int(rt.group(1), 0)}; }}\n"), "call2_then_virtual"
+
+
+RELOC_RULES = [rule_wrapper, rule_ctor_vtable, rule_chain_dtor, rule_guard_call,
+               rule_new_ctor, rule_dtor_vtable, rule_frame_call_const, rule_deleting_dtor,
+               rule_call_scale_fields, rule_frame_call_bool, rule_two_call_wrapper,
+               rule_indexed_inc, rule_frame_call_globals, rule_guarded_call_block,
+               rule_call_then_virtual, rule_call2_then_virtual, rule_method_body,
+               rule_guard_load_call, rule_fixed5_wrapper]
 
 
 RULES = [rule_empty, rule_ret_const, rule_ret_arg, rule_load, rule_load_mask,
@@ -654,16 +1765,27 @@ RULES = [rule_empty, rule_ret_const, rule_ret_arg, rule_load, rule_load_mask,
          rule_global_store_const, rule_store_global_addr, rule_field_bitop,
          rule_global_field_bitop, rule_two_global_setters, rule_two_indexed_store,
          rule_setbit_byidx, rule_testbit_byidx, rule_bit_test, rule_cmp_eq,
-         rule_struct_copy, rule_pool_const]
+         rule_struct_copy, rule_pool_const, rule_global_deref,
+         rule_global_swap, rule_two_global_store_const, rule_global_bit_test,
+         rule_global_struct_copy, rule_store_const_ret, rule_set_fields,
+         rule_virtual_call, rule_pmf_call, rule_pmf_call_guarded, rule_pmf_table_call,
+         rule_zero_then_global_copy]
 
 
 # ----------------------------------------------------------------------------- oracle
+# C++ sources (for C++-ABI idioms like virtual dispatch) are marked with a leading
+# `//cpp` line; they compile with -lang c++ and a .cpp temp file. extern "C" keeps
+# the function symbol unmangled so extract_func still finds it by name.
+CPP_FLAGS = M.DEFAULT_FLAGS.replace("-lang c99", "-lang c++")
+
+
 def oracle_ok(c_source, name, target):
-    """Compile candidate C and relocation-aware byte-diff against the ROM."""
+    """Compile candidate C/C++ and relocation-aware byte-diff against the ROM."""
+    cpp = c_source.startswith("//cpp")
     with tempfile.TemporaryDirectory() as td:
-        cfile = pathlib.Path(td) / "cand.c"
+        cfile = pathlib.Path(td) / ("cand.cpp" if cpp else "cand.c")
         cfile.write_text(c_source)
-        obj = M.compile_c(cfile, M.CANONICAL, M.DEFAULT_FLAGS)
+        obj = M.compile_c(cfile, M.CANONICAL, CPP_FLAGS if cpp else M.DEFAULT_FLAGS)
     if obj is None:
         return False
     code, relocs = M.extract_func(obj, name)

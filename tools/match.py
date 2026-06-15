@@ -40,9 +40,9 @@ CANONICAL = "1.2/sp2p3"
 md = Cs(CS_ARCH_ARM, CS_MODE_ARM)
 
 
-def target_bytes(addr: int, size: int) -> bytes:
-    data = ARM9.read_bytes()
-    off = addr - ARM9_BASE
+def target_bytes(addr: int, size: int, bin_path: pathlib.Path = ARM9, base: int = ARM9_BASE) -> bytes:
+    data = bin_path.read_bytes()
+    off = addr - base
     return data[off:off + size]
 
 
@@ -129,10 +129,17 @@ def main():
     ap.add_argument("--all", action="store_true", help="sweep every known version")
     ap.add_argument("--brief", action="store_true", help="terse: per-version pass/fail; diff only if none match")
     ap.add_argument("--flags", default=DEFAULT_FLAGS)
+    ap.add_argument("--bin", default=None,
+                    help="override target binary (e.g. an overlay) instead of arm9_dec.bin")
+    ap.add_argument("--base", default=None, type=lambda x: int(x, 0),
+                    help="load address of --bin (required with --bin)")
     args = ap.parse_args()
 
     cfile = pathlib.Path(args.c)
-    tgt = target_bytes(args.addr, args.size)
+    if args.bin:
+        tgt = target_bytes(args.addr, args.size, pathlib.Path(args.bin), args.base)
+    else:
+        tgt = target_bytes(args.addr, args.size)
     print(f"TARGET {args.func} @ 0x{args.addr:08x} size 0x{args.size:x}  bytes: {tgt.hex()}")
 
     if args.version:
