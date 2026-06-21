@@ -47,8 +47,9 @@ def _elf_text_and_relocs(data):
 _ARM_RELOC = {28: "R_ARM_CALL", 2: "R_ARM_ABS32", 10: "R_ARM_THM_CALL"}
 
 
-def main():
-    path = sys.argv[1]
+def render(path):
+    """Return the objdump-style text lines for a file. Importable so the permuter can
+    call it IN-PROCESS (no per-candidate python spawn -- a ~10x scoring speedup)."""
     with open(path, "rb") as f:
         data = f.read()
 
@@ -83,8 +84,11 @@ def main():
             out.append(f"{ins.address:8x}:\t00000000\treloc\t")
         else:
             out.append(f"{ins.address:8x}:\t{ins.bytes.hex()}\t{ins.mnemonic}\t{ins.op_str}")
+    return out
 
-    sys.stdout.write("\n".join(out) + "\n")
+
+def main():
+    sys.stdout.write("\n".join(render(sys.argv[1])) + "\n")
 
 
 if __name__ == "__main__":

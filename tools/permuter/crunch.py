@@ -46,14 +46,21 @@ def run_one(rec, secs, jobs):
     if not found:
         return "nochange"
     out, name, addr, size, _ = IMP.setup_dir(found, rec["c_source"])
+    # Popen + tree-kill on timeout: the permuter spawns -j worker PROCESSES that a plain
+    # timeout would orphan (they pile up and eat RAM). taskkill /T kills the whole tree.
+    p = subprocess.Popen(
+        [sys.executable, str(IMP.PERM_DIR / "permuter.py"), str(out),
+         "--stop-on-zero", "-j", str(jobs), "--quiet"],
+        cwd=str(IMP.PERM_DIR), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        subprocess.run(
-            [sys.executable, str(IMP.PERM_DIR / "permuter.py"), str(out),
-             "--stop-on-zero", "-j", str(jobs), "--quiet"],
-            timeout=secs, cwd=str(IMP.PERM_DIR),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        p.wait(timeout=secs)
     except subprocess.TimeoutExpired:
-        pass
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            p.wait(timeout=10)
+        except Exception:
+            pass
     except Exception:
         return "nochange"
     bo = best_output(out)
