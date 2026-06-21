@@ -40,7 +40,11 @@ def disasm(code, relocs):
         if ins.address in relocs:
             out.append(("reloc", "reloc <wildcard>"))
         else:
-            out.append((ins.mnemonic, f"{ins.mnemonic}  {ins.op_str}".rstrip()))
+            # wildcard the pc-relative pool OFFSET: "[pc, #0xNN]" depends on where the
+            # literal pool sits (a size artifact), not on the logic, so it would flag
+            # spurious "different" lines whenever the candidate's size differs.
+            op = re.sub(r"\[pc, #-?0x[0-9a-fA-F]+\]", "[pc, #<pool>]", ins.op_str)
+            out.append((ins.mnemonic, f"{ins.mnemonic}  {op}".rstrip()))
     return out
 
 
