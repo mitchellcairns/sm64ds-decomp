@@ -96,22 +96,37 @@ def find_regperm(module, maxsize, limit_scan):
 
 
 def run_permuter(out, secs):
-    """Run the permuter under a time budget; return the score-0 source.c text or None."""
+    """Run the permuter under a time budget; return the score-0 source.c text or None.
+
+    Output is captured to <dir>/permuter.log (NOT discarded) so a compile error, scorer
+    crash, or import problem is diagnosable instead of looking identical to "no score-0"
+    -- the silent-DEVNULL trap that hid permuter failures before (see notes)."""
+    log = out / "permuter.log"
     try:
-        subprocess.run(
-            [sys.executable, str(IMP.PERM_DIR / "permuter.py"), str(out),
-             "--stop-on-zero", "-j", "4", "--quiet"],
-            timeout=secs, cwd=str(IMP.PERM_DIR),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        with open(log, "w") as lf:
+            subprocess.run(
+                [sys.executable, str(IMP.PERM_DIR / "permuter.py"), str(out),
+                 "--stop-on-zero", "-j", "4"],
+                timeout=secs, cwd=str(IMP.PERM_DIR),
+                stdout=lf, stderr=subprocess.STDOUT,
+            )
     except subprocess.TimeoutExpired:
         pass
-    except Exception:
+    except Exception as e:
+        print(f"  (permuter run error: {e}; see {log})")
         return None
     for od in sorted(out.glob("output-0-*")):
         src = od / "source.c"
         if src.exists():
             return src.read_text()
+    # no crack: surface the base score / any error so failures aren't silent
+    try:
+        tail = [ln for ln in log.read_text(errors="ignore").splitlines()
+                if "base score" in ln or "error" in ln.lower() or "Traceback" in ln]
+        if tail:
+            print("  (permuter:", "; ".join(tail[-2:]).strip(), ")")
+    except Exception:
+        pass
     return None
 
 
