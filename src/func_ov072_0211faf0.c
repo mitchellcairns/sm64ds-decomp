@@ -1,7 +1,9 @@
-int func_ov072_0211faf0(void *c)
-{
-    *(unsigned char*)((char*)c + 0x3a2) = 0;
-    *(unsigned short*)((char*)c + 0x3a0) = 0x15;
-    *(unsigned int*)((char*)c + 0x394) = 1;
+int func_ov072_0211faf0(char *c) {
+    c[0x3A2] = 0;
+    
+    char *sub = c + 0x300;
+    *(unsigned short *)(sub + 0xA0) = 0x15;
+    
+    *(int *)(c + 0x394) = 1;
     return 1;
 }

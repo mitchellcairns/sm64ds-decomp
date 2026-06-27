@@ -1,18 +1,10 @@
-// func_02007870 @ 0x02007870 - Camera member, size 0x54.
-// Reads three packed unaligned s16 values (a Vector3_16) from a data record
-// and forwards them to a Camera helper at 0x0200d8ac, then returns 1.
+extern short ReadUnalignedShort(unsigned char *p);
+extern void func_0200d8ac(char *c, int r1, int r2, int r3);
 
-typedef short s16;
-typedef int s32;
-
-extern s16 ReadUnalignedShort(const void *p);       // 0x0200e768
-extern void func_0200d8ac(void *self, s16 a, s16 b, s16 c); // 0x0200d8ac
-
-s32 func_02007870(void *self, const unsigned char *data)
-{
-    s16 a = ReadUnalignedShort(data);
-    s16 b = ReadUnalignedShort(data + 2);
-    s16 c = ReadUnalignedShort(data + 4);
-    func_0200d8ac(self, a, b, c);
+int func_02007870(void *self, const unsigned char *data) {
+    int v1 = (int)ReadUnalignedShort((unsigned char *)data);
+    int v2 = (int)ReadUnalignedShort((unsigned char *)data + 2);
+    int v3 = (int)ReadUnalignedShort((unsigned char *)data + 4);
+    func_0200d8ac((char *)self, v1, v2, v3);
     return 1;
 }

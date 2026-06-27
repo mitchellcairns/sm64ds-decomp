@@ -1,7 +1,7 @@
-extern void sub_callee(int a, int b);
+extern void func_0200cb58(void *obj, int index);
 
 int func_02009dd0(int a)
 {
-    sub_callee(a, 3);
+    func_0200cb58((void *)a, 3);
     return 1;
 }

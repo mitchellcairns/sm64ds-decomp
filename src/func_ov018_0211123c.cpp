@@ -1,10 +1,15 @@
 //cpp
-extern "C" {
-extern void _ZN6Player16IncMegaKillCountEv(void*);
-extern void _ZN8Platform14KillByMegaCharER6Player(void*, void*);
-void func_ov018_0211123c(char *c, void *p){
-  _ZN6Player16IncMegaKillCountEv(p);
-  _ZN8Platform14KillByMegaCharER6Player(c, p);
-  *(short*)(c+0x8e) = *(short*)(c+0x94) + 0x4000;
-}
+struct Player {
+    void IncMegaKillCount();
+};
+
+struct Platform {
+    void KillByMegaChar(Player &);
+};
+
+extern "C" void func_ov018_0211123c(char *c, void *p) {
+    ((Player *)p)->IncMegaKillCount();
+    ((Platform *)c)->KillByMegaChar(*(Player *)p);
+    short val = *(short *)(c + 0x94);
+    *(short *)(c + 0x8e) = val + 0x4000;
 }

@@ -1,21 +1,14 @@
-/* func_0200d580 at 0x0200d580
- * Camera method: if playerID == CURR_PLAYER_ID, call ChangeState then func_0200cb58(thiz, 8).
- */
-
-typedef unsigned char u8;
-
-struct Camera_State;
 struct Camera;
-
-extern u8 CURR_PLAYER_ID;  /* 0x0209f250 */
-extern struct Camera_State gCameraState_0209b078;  /* 0x0209b078 */
-extern void _ZN6Camera11ChangeStateEPNS_5StateE(struct Camera *thiz, struct Camera_State *state); /* 0x0200cb70 */
-extern void func_0200cb58(struct Camera *thiz, int index); /* 0x0200cb58 */
+struct State;
+extern unsigned char data_0209f250;
+extern struct State data_0209b078;
+extern void _ZN6Camera11ChangeStateEPNS_5StateE(struct Camera *this, struct State *state);
+extern void func_0200cb58(void *obj, int index);
 
 void func_0200d580(struct Camera *thiz, int playerID)
 {
-    if (playerID != (int)CURR_PLAYER_ID)
+    if (playerID != data_0209f250)
         return;
-    _ZN6Camera11ChangeStateEPNS_5StateE(thiz, &gCameraState_0209b078);
+    _ZN6Camera11ChangeStateEPNS_5StateE(thiz, &data_0209b078);
     func_0200cb58(thiz, 8);
 }

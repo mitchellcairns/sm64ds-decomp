@@ -1,16 +1,11 @@
-typedef short s16;
+struct Camera;
 
-struct Camera {
-    char pad0[0x17a];
-    s16 fov;
-};
-
-extern s16 ReadUnalignedShort(const char *from);
-extern int ApproachLinear2(s16 *counter, s16 dest, s16 step);
+extern short ReadUnalignedShort(unsigned char *p);
+extern short ApproachLinear2(short *ref, short a, short b);
 
 int func_0200840c(struct Camera *cam, const char *data) {
-    s16 dest = ReadUnalignedShort(data);
-    s16 step = ReadUnalignedShort(data + 2);
-    ApproachLinear2(&cam->fov, dest, step);
+    short v1 = ReadUnalignedShort((unsigned char *)data);
+    short v2 = ReadUnalignedShort((unsigned char *)data + 2);
+    ApproachLinear2((short *)((char *)cam + 0x17a), v1, v2);
     return 1;
 }

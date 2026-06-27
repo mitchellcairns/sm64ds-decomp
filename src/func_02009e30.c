@@ -1,6 +1,9 @@
-extern int func_0200cb58(int a, int b);
+extern void func_0200cb58(void *obj, int index);
 
-int func_02009e30(int a) {
-    func_0200cb58(a, 0);
+int func_02009e30(int a)
+{
+    int dummy = 0;
+    (void)&dummy;
+    func_0200cb58((void *)a, 0);
     return 1;
 }

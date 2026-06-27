@@ -1,10 +1,13 @@
 //cpp
-extern "C" {
-extern int func_ov002_020bac18(void*);
-extern int _ZN8Platform19UpdateClsnPosAndRotEv(void*);
-int func_ov014_02111268(void *c){
-  int r = func_ov002_020bac18(c);
-  _ZN8Platform19UpdateClsnPosAndRotEv(c);
-  return r;
-}
+class Platform {
+public:
+void UpdateClsnPosAndRot();
+};
+
+extern "C" int func_ov002_020bac18();
+
+extern "C" int func_ov014_02111268(Platform *r5) {
+int r4 = func_ov002_020bac18();
+r5->UpdateClsnPosAndRot();
+return r4;
 }

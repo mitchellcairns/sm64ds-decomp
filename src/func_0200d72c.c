@@ -1,29 +1,15 @@
-/* func_0200d72c at 0x0200d72c
- * Checks if playerID == CURR_PLAYER_ID; if so, calls Camera::ChangeState
- * with a pointer to settingBehaviourTable[4] (offset 0x20 from base 0x0209B008).
- */
+struct Camera;
+struct State;
 
-typedef unsigned char u8;
-typedef int s32;
+extern int data_0209f250;
+extern int data_0209b028;
 
-extern u8 CURR_PLAYER_ID;  /* 0x0209f250 */
+extern void _ZN6Camera11ChangeStateEPNS_5StateE(struct Camera *thiz,
+                                               struct State *state);
 
-struct Camera_State {
-    void *OnUpdate;
-    void *OnPlayerChangeState;
-};
-
-extern struct Camera_State settingBehaviourTable[]; /* 0x0209B008 */
-
-struct Camera {
-    char pad[0x50];
-};
-
-extern s32 _ZN6Camera11ChangeStateEPNS_5StateE(struct Camera *thiz, struct Camera_State *newState);
-
-void func_0200d72c(struct Camera *thiz, u8 playerID)
+void func_0200d72c(struct Camera *thiz, unsigned char playerID)
 {
-    if (playerID != CURR_PLAYER_ID)
-        return;
-    _ZN6Camera11ChangeStateEPNS_5StateE(thiz, &settingBehaviourTable[4]);
+    if (playerID == *(unsigned char *)&data_0209f250)
+        _ZN6Camera11ChangeStateEPNS_5StateE(thiz,
+                                            (struct State *)&data_0209b028);
 }

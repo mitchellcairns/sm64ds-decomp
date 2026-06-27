@@ -1,9 +1,15 @@
 //cpp
-extern "C" {
-int _ZN5Actor15GivePlayerCoinsER6Playerhj(void *thisp, void *player, unsigned char count, unsigned int z);
-int _ZN5Actor24KillAndTrackInDeathTableEv(void *thisp);
-int func_ov070_021204ec(char *c, void *player) {
-    _ZN5Actor15GivePlayerCoinsER6Playerhj(c, player, (unsigned char)(*(unsigned char*)(c+0x10a)+1), 0);
-    return _ZN5Actor24KillAndTrackInDeathTableEv(c);
-}
+class Player;
+
+class Actor {
+public:
+void GivePlayerCoins(Player &player, unsigned char count, unsigned int unknown);
+void KillAndTrackInDeathTable();
+};
+
+extern "C" void func_ov070_021204ec(char *c, void *player) {
+Actor *r4 = (Actor *)c;
+unsigned char r2 = ((unsigned char *)r4)[0x10a];
+r4->GivePlayerCoins(*(Player *)player, r2 + 1, 0);
+r4->KillAndTrackInDeathTable();
 }

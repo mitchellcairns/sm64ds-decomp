@@ -1,4 +1,8 @@
-extern int func_ov063_0211a634(void*, int);
-void func_ov063_02116df0(void* c){
-  if(func_ov063_0211a634(c, 0x14)) *(unsigned char*)((char*)c+0x5cc)=1;
+extern int func_ov063_0211a634(void *c, int val);
+
+void func_ov063_02116df0(void *c) {
+    void *r4 = c;
+    if (func_ov063_0211a634(r4, 0x14)) {
+        *((char *)r4 + 0x5CC) = 1;
+    }
 }

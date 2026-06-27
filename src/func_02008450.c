@@ -1,11 +1,9 @@
-struct S {
-    unsigned char pad[0x17a];
-    short field_0x17a;
-};
+struct S;
+extern unsigned short ReadUnalignedUshort(unsigned char *p);
 
-extern short someFunc(int x);
-
-int func_02008450(struct S *p, int arg1) {
-    p->field_0x17a = someFunc(arg1);
+int func_02008450(struct S *p, int arg1)
+{
+    unsigned short v = ReadUnalignedUshort((unsigned char *)arg1);
+    *((unsigned short *)((unsigned char *)p + 0x17a)) = v;
     return 1;
 }

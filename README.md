@@ -5,8 +5,8 @@ A from-scratch effort to decompile **Super Mario 64 DS** into matching C.
 ## Progress
 
 ```
-Functions  ██████████████████░░░░░░░░░░░░  60.0%   6,834 / 11,390
-Code size  ████████░░░░░░░░░░░░░░░░░░░░░░  25.2%   563,872 / 2,234,028 bytes
+Functions  ██████████████████░░░░░░░░░░░░  60.1%   6,846 / 11,390
+Code size  ████████░░░░░░░░░░░░░░░░░░░░░░  25.3%   565,120 / 2,234,028 bytes
 ```
 
 Every arm-mode function in the game, drawn as a treemap. Each rectangle is one
@@ -149,6 +149,8 @@ functions across ov002, ov006, arm9, and ov034 (PR #1), including the first func
 ov034 and several that had resisted the automated passes.
 [andrewboudreau](https://github.com/andrewboudreau) hand-matched 9 functions across arm9,
 ov002, ov006, and ov007 (PR #2).
+[Moundistz](https://github.com/Moundistz) contributed 3 matched functions and 8 nonmatching
+floor entries, plus a pass of placeholder-to-resolved callee renames across the arm9 corpus.
 
 Tooling contributions: [webheadvr](https://github.com/webheadvr) made the relocation
 symbol resolver module-aware, fixing wrong-overlay symbol picks where overlay address

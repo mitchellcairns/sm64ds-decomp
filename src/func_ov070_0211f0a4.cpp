@@ -1,15 +1,20 @@
 //cpp
-extern "C" {
-int _ZN5Actor13SmallPoofDustEv(void*);
-int _ZN5Actor10SpawnCoinsERK7Vector3j5Fix12IiEs(void*, void*, unsigned, int, short);
-int _ZN5Actor24KillAndTrackInDeathTableEv(void*);
-int func_ov070_0211f0a4(void* c){
-  int v[3];
-  _ZN5Actor13SmallPoofDustEv(c);
-  v[0]=*(int*)((char*)c+0x5c);
-  v[1]=*(int*)((char*)c+0x60);
-  v[2]=*(int*)((char*)c+0x64);
-  _ZN5Actor10SpawnCoinsERK7Vector3j5Fix12IiEs(c, v, *(unsigned char*)((char*)c+0x10a)+1, 0xa000, 0);
-  return _ZN5Actor24KillAndTrackInDeathTableEv(c);
-}
+struct Vector3 { int x, y, z; };
+
+struct Actor {
+    void SmallPoofDust();
+    void SpawnCoins(Vector3 const &, unsigned int, int, short);
+    void KillAndTrackInDeathTable();
+};
+
+extern "C" int func_ov070_0211f0a4(void *c) {
+    Actor *a = (Actor *)c;
+    a->SmallPoofDust();
+    Vector3 pos;
+    pos.x = *(int *)((char *)c + 0x5c);
+    pos.y = *(int *)((char *)c + 0x60);
+    pos.z = *(int *)((char *)c + 0x64);
+    unsigned int coins = *(unsigned char *)((char *)c + 0x10a) + 1;
+    a->SpawnCoins(pos, coins, 0xa000, 0);
+    a->KillAndTrackInDeathTable();
 }

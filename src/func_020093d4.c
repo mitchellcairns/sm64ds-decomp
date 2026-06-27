@@ -1,8 +1,13 @@
-struct S {
-    char pad[0x108];
-    int field_0x108;
-};
+typedef struct {
+    int _pad[0x108/4];
+    int field_108;
+} S;
 
-int func_020093d4(struct S *p, int a) {
-    return (int)(((long long)a * p->field_0x108 + 0x800) >> 12);
+unsigned int func_020093d4(S *p, int a)
+{
+    unsigned long long prod = (unsigned long long)a * (unsigned long long)p->field_108;
+    unsigned long long sum  = prod + 0x800u;
+    unsigned int lo = (unsigned int)sum;
+    unsigned int hi = (unsigned int)(sum >> 32);
+    return (lo >> 12) | (hi << 20);
 }

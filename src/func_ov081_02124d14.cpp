@@ -1,10 +1,14 @@
 //cpp
-extern "C" {
-struct BCA_File; struct SharedPtr{void*a;BCA_File*f;};
-extern struct SharedPtr data_ov081_02128db8;
-int _ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj(void*,BCA_File*,int,int,unsigned);
-int func_ov081_02124d14(char*c){
-  _ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj(c+0x30c, data_ov081_02128db8.f, 0x40000000, 0x1000, 0);
-  return 1;
-}
+struct BCA_File;
+struct ModelAnim {
+    void SetAnim(BCA_File *, int, int, unsigned int);
+};
+
+extern int data_ov081_02128db8;
+
+extern "C" int func_ov081_02124d14(char *c) {
+    unsigned int flags = 0;
+    BCA_File *file = (BCA_File *)(((int *)&data_ov081_02128db8)[1]);
+    ((ModelAnim *)(c + 0x30c))->SetAnim(file, 0x40000000, 0x1000, flags);
+    return 1;
 }
