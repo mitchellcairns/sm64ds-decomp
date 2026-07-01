@@ -42,7 +42,8 @@ def run_one(rec, secs, jobs):
     """Permute one DB record. Returns 'banked' | 'improved' | 'nochange'.
     All DB/ledger writes happen under the cross-process lock (DB.locked)."""
     import json
-    found = IMP.find_func(rec["module"], int(rec["addr"], 0), rec["name"])
+    a = rec["addr"]
+    found = IMP.find_func(rec["module"], int(a, 0) if isinstance(a, str) else a, rec["name"])
     if not found:
         return "nochange"
     # A //cpp near-miss whose body is C-compatible is converted to plain C so the
@@ -103,14 +104,46 @@ def main():
     ap.add_argument("-j", "--jobs", type=int, default=3, help="permuter threads per function")
     ap.add_argument("--shard", default="0/1", help="i/N: this instance handles entries where idx%%N==i")
     ap.add_argument("--loop", action="store_true")
+    ap.add_argument("--category", default=None,
+                    help="comma list of category substrings to keep (route 'register "
+                         "allocation,instruction reorder' here; structural goes to refine)")
+    ap.add_argument("--skip-attempted", action="store_true",
+                    help="skip names in progress/refine_attempted.txt (e.g. while a "
+                         "refine batch is in flight on them)")
     args = ap.parse_args()
     i, n = (int(x) for x in args.shard.split("/"))
+
+    attempted = set()
+    if args.skip_attempted:
+        ap_file = REPO / "progress" / "refine_attempted.txt"
+        if ap_file.exists():
+            attempted = {l.strip() for l in ap_file.read_text().splitlines() if l.strip()}
 
     while True:
         db = DB.load_db()
         pile = sorted((r for r in db.values()
-                       if r.get("divergences") is not None and 0 < r["divergences"] <= args.max_div),
-                      key=lambda r: (r["divergences"], r["module"], r["addr"]))
+                       if r.get("divergences") is not None and 0 < r["divergences"] <= args.max_div
+                       and r["name"] not in attempted),
+                      key=lambda r: (r["divergences"], r["module"], str(r["addr"])))
+        if args.category:
+            import json as _json
+            import categorize_misses as CAT
+            cachep = REPO / "progress" / "nm_categories.json"
+            cache = _json.loads(cachep.read_text()) if cachep.exists() else {}
+            want = {c.strip().lower() for c in args.category.split(",")}
+
+            def catof(r):
+                a = r["addr"]
+                key = f"{r['module']}:{int(a, 0) if isinstance(a, str) else a}:{r['divergences']}"
+                if key not in cache:
+                    try:
+                        cache[key] = CAT.classify_entry(r["c_source"], r["name"],
+                                                        bytes.fromhex(r["target_hex"]))
+                    except Exception:
+                        cache[key] = "error"
+                return cache[key]
+            pile = [r for r in pile if any(w in catof(r).lower() for w in want)]
+            cachep.write_text(_json.dumps(cache))
         mine = [r for k, r in enumerate(pile) if k % n == i][:args.limit]
         if not mine:
             print(f"[shard {i}/{n}] nothing in range.")

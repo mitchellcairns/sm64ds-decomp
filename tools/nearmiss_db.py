@@ -243,7 +243,8 @@ def export_close(args):
         want = {c.strip().lower() for c in args.category.split(",")}
         kept = []
         for r in out:
-            key = f"{r['module']}:{r['addr']}:{r['divergences']}"
+            a = r["addr"]
+            key = f"{r['module']}:{int(a, 0) if isinstance(a, str) else a}:{r['divergences']}"
             cat = cache.get(key)
             if cat is None:
                 try:
