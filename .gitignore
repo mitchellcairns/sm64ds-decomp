@@ -54,3 +54,7 @@ notes/ac-decomp-comparison.md
 
 # third-party tools cloned for evaluation/integration (not part of this repo)
 vendor/
+
+# local-only, never commit
+tools/claims.py
+/scratchpad/

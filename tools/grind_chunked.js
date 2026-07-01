@@ -41,9 +41,11 @@ const REPO = 'C:\\\\Users\\\\bmanu\\\\Documents\\\\sm64ds-decomp'
 const raw = typeof args === 'string' ? JSON.parse(args) : args
 const targets = Array.isArray(raw) ? raw : raw.targets
 const N = (raw && raw.agents) ? raw.agents : 5
-// Optional model override (e.g. 'sonnet'/'haiku' for cheap pattern-harvest batches;
-// omit to inherit the main-loop model). Tier: cheap for known idioms, Opus for novel logic.
-const MODEL = (raw && raw.model) ? raw.model : undefined
+// Model: defaults to Sonnet 5. A 2026-06-30 A/B on 24 frontier funcs found Opus 4.8 and
+// Sonnet 5 at parity (12/24 each) with Sonnet ~35-55% cheaper, and every failure was the
+// same model-independent codegen floor -- so Sonnet 5 is the default fan-out model. Pass
+// model:'opus' for a batch of genuinely novel logic, or 'haiku' for trivial pattern-harvest.
+const MODEL = (raw && raw.model) ? raw.model : 'sonnet'
 
 // Contiguous chunks so a pre-ordered cluster (shared struct/callees) stays with
 // ONE agent -> it learns the struct once and reuses it across siblings.
