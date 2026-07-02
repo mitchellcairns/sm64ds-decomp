@@ -300,6 +300,35 @@ Still floor after this pass (7/12): zero-offset first-access-fold materializatio
 pre-indexed writeback from plain C, pure register-coloring swaps (~150 variants tried
 on func_ov075_0211a948), and store-emission order.
 
+## 6f. The pragma space, exhaustively characterized (2026-07-01)
+
+Swept 20 CodeWarrior pragmas x all 96 div<=4 near-misses (1,920 compiles). Verdict:
+
+- **`#pragma optimize_for_size on` cracks early-exit epilogue DUPLICATION** - the 6d
+  class where -O4,p duplicates a short conditional epilogue (popeq/bxeq) instead of
+  branching to the shared tail. It byte-matched func_0206ce20 after 10 source phrasings
+  had failed. When the diff shows a duplicated vs shared epilogue, put this pragma above
+  the function.
+- `#pragma opt_strength_reduction off` keeps pointer-induction loops un-reduced (sec 6e).
+- EVERYTHING else is inert on this backlog: opt_common_subs / opt_dead_assignments /
+  opt_dead_code / opt_lifetimes / opt_loop_invariants / opt_propagation /
+  opt_unroll_loops off, optimization_level 1/2/3, optimize_for_size off, pool_data
+  on/off, global_optimizer off, auto_inline off, inline_depth(0), ipa off, common on -
+  zero divergence changes anywhere. scheduling/peephole are silently ignored (6d).
+
+## 6g. The materialization "floor", precisely bounded (2026-07-01 corpus search)
+
+Searched all matched functions' ROM bytes for `add rX, base, #imm` + zero-offset `[rX]`
+first access: 61 verified instances exist, and ALL decode to two reproducible triggers:
+(1) **encoding-forced** - halfword/byte accesses cannot encode offsets >= 0x100, so the
+compiler must materialize (`*(short*)(p+0x100) = k` does it from plain C); (2)
+**pointer-as-value** - the address is passed to a call (incl. `this` for virtual
+dispatch on a sub-object: `Sub *b = &c->sub; b->m(0);`). The TRUE unreachable class is
+only: word-width access, ldr/str-encodable offset, pointer never used as a value.
+Re-check a "materialization floor" diagnosis against these two triggers before giving
+up - some parked entries may be misclassified encoding/arg-pass cases. Tried and dead:
+C++ references, reference-to-array, inline member fns via this (all fold identically).
+
 ## 7. Workflow implications
 
 - **Free tiers first, every cycle:** `clone.py --apply` (byte-identical retarget) then

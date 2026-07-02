@@ -60,6 +60,8 @@ STRUCTURAL LEVERS (these fix what the permuter cannot; pick by what the diff sho
 - blocked narrowing: reassign before the call (`dh = (s16)(h - dh);` as a statement) to stop copy-propagation folding the cast into the arg
 - branch to the SHARED final epilogue from a nested switch: break out of both switches and put the tail in an else
 - pointer-induction loop reduced away: try `#pragma opt_strength_reduction off` above the function (this pragma WORKS; scheduling/peephole are ignored)
+- DUPLICATED early-exit epilogue (popeq/bxeq repeated instead of a beq to the shared tail): `#pragma optimize_for_size on` above the function
+- halfword/byte access at offset >= 0x100 in the target with a materialized base: that is ENCODING-forced - plain `*(short*)(p+0x100) = k` reproduces it; and a base passed as `this`/call-arg materializes too (Sub *b = &c->sub; b->m(...))
 - stack slots optimized away: a volatile array keeps them live
 For the full catalogue read notes/pret-idioms.md and notes/mwccarm-codegen.md (sec 6e has the newest levers).
 
