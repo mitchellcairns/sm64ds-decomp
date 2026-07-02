@@ -209,6 +209,16 @@ def bank(record, src_text):
         existing = [p for p in (SRC / f"{name}.c", SRC / f"{name}.cpp")
                     if p.exists()]
         if existing:
+            # Adoption: the file already on disk IS this verified source (typical
+            # after merging a contributor's PR - src arrives via git, the local
+            # gitignored ledger has no entry). Append the entry, leave the file.
+            same = [p for p in existing
+                    if p.suffix == "." + ext
+                    and p.read_text(encoding="utf-8") == body]
+            if same:
+                _append_line(MATCHED, rec)
+                _drop_nonmatching(k)
+                return "banked"
             parked_owner = None
             for r in read_records(NONMATCHING):
                 if r.get("name") == name:
@@ -231,4 +241,27 @@ def bank(record, src_text):
 
         (SRC / f"{name}.{ext}").write_text(body, encoding="utf-8")
         _append_line(MATCHED, rec)
+        _drop_nonmatching(k)
     return "banked"
+
+
+def _drop_nonmatching(k):
+    """A verified match overrides a stale park: remove any NONMATCHING rows for
+    this key. Caller holds the ledger lock. Atomic rewrite."""
+    if not NONMATCHING.exists():
+        return
+    kept, dropped = [], 0
+    for line in NONMATCHING.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            if key_of(json.loads(line)) == k:
+                dropped += 1
+                continue
+        except Exception:
+            pass
+        kept.append(line)
+    if dropped:
+        tmp = NONMATCHING.with_name(NONMATCHING.name + ".tmp")
+        tmp.write_text("".join(l + "\n" for l in kept), encoding="utf-8")
+        os.replace(tmp, NONMATCHING)

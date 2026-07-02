@@ -39,7 +39,9 @@ def main():
                 cands[r["name"]] = r["c_source"]   # ranges disjoint; last wins on dup name
     print(f"collected {len(cands)} candidates from {args.glob}")
 
-    done = L.load_done()
+    # matched_set, NOT load_done: a stale NONMATCHING park must not block banking a
+    # function that has since been cracked (ledger.bank drops the park on success)
+    done = L.matched_set()
     banked, rejected, dup = [], [], 0
     for name, src in cands.items():
         info = NM.resolve_name(name)
