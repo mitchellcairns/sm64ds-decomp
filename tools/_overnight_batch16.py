@@ -17,14 +17,6 @@ FLOORS = [
 
 
 def batch_status():
-    cmd = [
-        sys.executable,
-        str(REPO.parent / "stuperprok" / "sm64ds-decomp-scratch" / "tools" / "_batch16.py"),
-        "status",
-    ]
-    if not cmd[1].is_file():
-        cmd[1] = str(REPO / "tools" / "_batch16_status.py")
-    # fallback: inline match
     out = []
     entries = [
         ("func_ov007_020bc3dc", "src/func_ov007_020bc3dc.c", "0x020bc3dc", "0x58",
