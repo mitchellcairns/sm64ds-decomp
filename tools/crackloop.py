@@ -66,14 +66,19 @@ def prep(a):
     if not rows:
         print("worklist is empty - nothing to do"); sys.exit(1)
 
-    try:
-        sys.path.insert(0, str(TOOLS))
-        import claims
-        held = claims.lock_worklist(str(wl))   # trims conflicted rows from the file itself
-        active.write_text(json.dumps(held))
-    except ImportError:
-        print("tools/claims.py not present (public clone) - skipping the lock step; "
-              "coordinate via CLAIMS.md")
+    if a.no_claims:
+        print("--no-claims: skipping the lock step (coordinate via CLAIMS.md); "
+              "use when the local claims key is expired")
+        active.write_text("[]")
+    else:
+        try:
+            sys.path.insert(0, str(TOOLS))
+            import claims
+            held = claims.lock_worklist(str(wl))   # trims conflicted rows from the file itself
+            active.write_text(json.dumps(held))
+        except ImportError:
+            print("tools/claims.py not present (public clone) - skipping the lock step; "
+                  "coordinate via CLAIMS.md")
 
     # re-read: the lock step drops conflicted rows from the worklist file in place
     rows = [json.loads(l) for l in wl.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -219,6 +224,8 @@ def main():
                    help="attach m2c semantic drafts to scaffold-less rows "
                         "(coddog_sim < 0.5, size > 0x300); use for LARGE bands. "
                         "Needs vendor/m2c (notes/m2c-setup.md)")
+    p.add_argument("--no-claims", action="store_true",
+                   help="skip claims locking (e.g. expired local key); coordinate via CLAIMS.md")
     p.add_argument("--tag", default="ab",
                    help="batch tag: distinct worklist + claims files so several "
                         "fresh batches can run in parallel (default 'ab')")
@@ -232,6 +239,8 @@ def main():
     p.add_argument("--refine", action="store_true",
                    help="refine batch: use wl_refine.jsonl, no parking, no claims")
     p.add_argument("--wl", default=None, help="explicit worklist override")
+    p.add_argument("--no-claims", action="store_true",
+                   help="skip claims locking (e.g. expired local key); coordinate via CLAIMS.md")
     p.add_argument("--tag", default="ab", help="batch tag used at prep time")
     p.set_defaults(fn=land)
     a = ap.parse_args()
