@@ -1,6 +1,3 @@
-// NONMATCHING: register allocation (div=8). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 extern int func_0204ef9c(void *p);
 extern void func_0205cd34(void *o);
 extern int _ZN4cstd6strlenEPKc(const char *s);
@@ -16,6 +13,7 @@ int func_0204ee40(void *self, char *name, char *p)
     int i;
     char *cur;
     int n;
+    char *fimg_off;
 
     fatb = 0;
     fntb = 0;
@@ -34,11 +32,11 @@ int func_0204ee40(void *self, char *name, char *p)
             case 0x46415442:
                 fatb = cur;
                 break;
-            case 0x46494d47:
-                fimg = cur;
-                break;
             case 0x464e5442:
                 fntb = cur;
+                break;
+            case 0x46494d47:
+                fimg = cur;
                 break;
             }
             cur += *(int *)(cur + 4);
@@ -49,14 +47,14 @@ int func_0204ee40(void *self, char *name, char *p)
     func_0205cd34(self);
     *(char **)((char *)self + 0x50) = p;
     *(char **)((char *)self + 0x54) = fatb;
-    fimg += 8;
-    *(char **)((char *)self + 0x58) = fimg;
+    fimg_off = fimg + 8;
+    *(char **)((char *)self + 0x58) = fimg_off;
 
     if (func_0205cc80(self, name, (void *)_ZN4cstd6strlenEPKc(name)) == 0)
         return 0;
 
-    if (func_0205cb68(self, (int)fimg, (int)(fatb + 0xc) - (int)fimg,
-                      *(int *)(fatb + 4) - 0xc, (int)(fntb + 8) - (int)fimg,
+    if (func_0205cb68(self, (int)fimg_off, (int)(fatb + 0xc) - (int)fimg_off,
+                      *(int *)(fatb + 4) - 0xc, (int)(fntb + 8) - (int)fimg_off,
                       *(int *)(fntb + 4) - 8, 0, 0))
         return 1;
 

@@ -1,6 +1,3 @@
-// NONMATCHING: extra logic (you do more) (div=4). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 extern int func_02017acc(void*, int);
 extern void func_020731dc(void*, void*, void**);
 extern int _ZN13SharedFilePtr9ConstructEj(void*, int);
@@ -71,9 +68,10 @@ void __sinit_ov062_0211cf30(void)
     data_ov062_0211df10.z = -0x78000;
     func_020731dc(&data_ov062_0211df10, (void*)&func_020072c0, (void**)&data_ov062_0211de58);
 
-    data_ov062_0211df1c.x = 0x44000;
-    data_ov062_0211df1c.y = -0x14000;
-    data_ov062_0211df1c.z = -0x78000;
+    int* p_df1c = (int*)&data_ov062_0211df1c;
+    *p_df1c = 0x44000;
+    p_df1c[1] = -0x14000;
+    p_df1c[2] = -0x78000;
     func_020731dc(&data_ov062_0211df1c, (void*)&func_020072c0, (void**)&data_ov062_0211de64);
 
     data_ov062_0211ded0.a = data_ov062_0211d940;

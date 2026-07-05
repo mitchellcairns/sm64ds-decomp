@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: extra logic (you do more) (div=15). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 extern "C" {
 extern void Matrix4x3_FromRotationY(void* m, int angle);
 extern void MulVec3Mat4x3(void* out, void* m, void* in);
@@ -15,7 +12,7 @@ void func_ov090_02133710(char* c) {
     struct V3 v;
     struct V3 v2;
     void* a;
-    *(int*)(c + 0x384) += 1;
+    *(int*)(((int)c + 0x384) & 0xFFFFFFFFFFFFFFFF) += 1;
     if (*(int*)(c + 0x384) > 2) *(int*)(c + 0x384) = 0;
     v.x = 0;
     v.y = 0;

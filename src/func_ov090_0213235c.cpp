@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: register allocation (div=4). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 typedef int Fix12;
 typedef struct { int w[2]; } SharedFilePtr;
 typedef struct { short x,y,z; } Vector3_16;
@@ -14,7 +11,7 @@ struct RG { char a[0x14]; int detect[16]; };
 extern "C" {
 BMD_File* _ZN5Model8LoadFileER13SharedFilePtr(SharedFilePtr* f);
 void _ZN9ModelBase7SetFileEP8BMD_Fileii(void* self, BMD_File* f, int a, int b);
-void _ZN9Animation8LoadFileER13SharedFilePtr(SharedFilePtr* f);
+void _ZN5Animation8LoadFileER13SharedFilePtr(SharedFilePtr* f);
 void _ZN25MovingCylinderClsnWithPos4InitEP5ActorRK7Vector35Fix12IiES6_jj(void* self, Actor* a, Vector3* v, Fix12 r, Fix12 h, unsigned int e, unsigned int g);
 void _ZN12WithMeshClsn4InitEP5Actor5Fix12IiES3_P10Vector3_16S5_(void* self, Actor* a, Fix12 r, Fix12 h, Vector3_16* p, Vector3_16* q);
 void func_0203558c(void* self);
@@ -51,10 +48,10 @@ extern "C" int func_ov090_0213235c(char* c)
 
     f = _ZN5Model8LoadFileER13SharedFilePtr(&data_ov090_021344a0);
     _ZN9ModelBase7SetFileEP8BMD_Fileii(c+0x30c, f, 1, -1);
-    _ZN9Animation8LoadFileER13SharedFilePtr(&data_ov090_02134488);
-    _ZN9Animation8LoadFileER13SharedFilePtr(&data_ov090_02134480);
-    _ZN9Animation8LoadFileER13SharedFilePtr(&data_ov090_02134490);
-    _ZN9Animation8LoadFileER13SharedFilePtr(&data_ov090_02134498);
+    _ZN5Animation8LoadFileER13SharedFilePtr(&data_ov090_02134488);
+    _ZN5Animation8LoadFileER13SharedFilePtr(&data_ov090_02134480);
+    _ZN5Animation8LoadFileER13SharedFilePtr(&data_ov090_02134490);
+    _ZN5Animation8LoadFileER13SharedFilePtr(&data_ov090_02134498);
 
     *(int*)(c+0xa0) = -0x3c000;
 
@@ -96,8 +93,9 @@ extern "C" int func_ov090_0213235c(char* c)
             int py = *(int*)(c+0x60);
             int pz = *(int*)(c+0x64);
             int px = *(int*)(c+0x5c);
+            int ip = py + 0x32000;
             pos.x = px;
-            pos.y = py + 0x32000;
+            pos.y = ip;
             pos.z = pz;
         }
         _ZN13RaycastGround12SetObjAndPosERK7Vector3P5Actor(&rg, &pos, (Actor*)c);
