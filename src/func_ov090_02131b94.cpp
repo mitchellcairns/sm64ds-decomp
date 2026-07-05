@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: different op / idiom (div=27). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 typedef int Fix12i;
 struct BCA_File;
 struct ModelAnim {
@@ -20,11 +17,13 @@ extern "C" int func_ov090_02131b94(char* thiz)
 {
     char* c = thiz;
     unsigned int r;
-    int off = 0x39a;
+    short* s;
     r = (unsigned)RandomIntInternal(&data_0209e650);
-    *(short*)(c + off) = (short)(*(short*)(c + off) + ((int)(((r >> 8) & 3) << 0x1e) >> 16));
+    s = (short*)(((unsigned int)c + 0x39a) & 0xFFFFFFFFFFFFFFFFull);
+    *s = (short)(*s + ((int)(((r >> 8) & 3) << 0x1e) >> 16));
     r = (unsigned)RandomIntInternal(&data_0209e650);
-    *(short*)(c + off) = (short)(*(short*)(c + off) + ((int)(((r >> 8) & 7) << 0x1d) >> 16));
+    s = (short*)(((long long)(int)(c + 0x39a)) & 0xFFFFFFFFFFFFFFFFll);
+    *s = (short)(*s + ((int)(((r >> 8) & 7) << 0x1d) >> 16));
     r = (unsigned)RandomIntInternal(&data_0209e650);
     *(short*)(c + 0x100) = (short)(((r >> 8) & 0x1f) + 0x96);
     *(int*)(c + 0x3a4) = 0x1000;

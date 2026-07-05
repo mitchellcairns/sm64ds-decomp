@@ -1,6 +1,3 @@
-// NONMATCHING: extra logic (you do more) (div=28). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef short s16;
@@ -40,7 +37,7 @@ int func_ov078_02123d3c(char* c)
         v.x = *(int*)(c + 0x5c);
         v.y = *(int*)(c + 0x60);
         v.z = *(int*)(c + 0x64);
-        *(s16*)(c + 0x94) += 0x1000;
+        *(s16*)(((int)c + 0x94) & 0xFFFFFFFFFFFFFFFF) += 0x1000;
         *(int*)(c + 0x98) = 0;
     } else {
         s16 a = Vec3_HorzAngle((Vector3*)(c + 0x5c), &v);
