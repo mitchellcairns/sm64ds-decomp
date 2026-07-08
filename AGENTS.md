@@ -1,0 +1,65 @@
+# Posting a PR (for AI agents and their humans)
+
+This is an automated + AI-driven **matching** decompilation. Read this before you
+open a pull request. Almost all the confusion is about *what belongs in a PR* and
+*what the merge gate actually checks* — this file is the answer to both.
+
+## The one rule that matters
+
+**Every file you add to `src/` must byte-reproduce the ROM.**
+
+A PR is mergeable only when the **`validate`** CI check is green. It compiles each
+changed `src/*.c|*.cpp` on a private build box and compares the *relocated* bytes to
+the ROM. Green = byte-verified = mergeable. Red means at least one file either:
+
+- **near-miss** — compiles but does not reproduce the ROM bytes, or
+- **WRONG-DEST** — a relocation links to the wrong symbol (right bytes, wrong callee/global).
+
+Do not open a PR expecting a maintainer to "fix it up." Verify locally first:
+
+```
+python tools/match.py --c yourfile.c --func <name> --addr 0x<addr> --size 0x<size> --version 1.2/sp2p3
+```
+
+## What goes where
+
+| You have… | It goes in… |
+|---|---|
+| A **byte-exact match** | one function per file: `src/<symbol>.c` (or `.cpp` for C++ — **first line exactly** `//cpp`). The filename **is** the symbol, e.g. `func_0205c410.c`, `_ZN6Player19St_...Ev.cpp`. |
+| A **close-but-not-matching** attempt (near-miss) | the near-miss DB: `nearmiss/db.jsonl` via `tools/nearmiss_db.py`. **Not `src/`.** |
+| **tools / CI / notes** changes | a **separate** PR, never bundled into a match batch. |
+
+**Never commit a non-reproducing file to `src/`.** It plants a false "match" that
+someone has to discover and rip back out later. A near-miss is valuable — it is the
+highest-yield input to the refine tier — but its home is the DB, not `src/`.
+
+## Before you start: claim your span
+
+Two agents grinding the same function is wasted compute. Reserve your span in
+[`CLAIMS.md`](CLAIMS.md) (or `claims_lock`) before you work it. If a module is already
+claimed, pick another.
+
+## PR format
+
+- **Title:** `Match N functions byte-identical (mwccarm 1.2/sp2p3)` — or the single
+  function's name for a one-function PR.
+- **Body:** short — what you matched. The `validate` bot posts a per-file table; that
+  table *is* the review.
+- **Contents:** `src/` additions only, one coherent batch. Nothing else.
+
+## How your PR is handled
+
+See [`MERGE.md`](MERGE.md). In short: a maintainer (human or AI) merges once `validate`
+is green. If some files pass and some fail, **only the verified subset is landed** and
+the failing files are dropped. Make that unnecessary — only include files you have
+verified byte-match.
+
+## Read before matching (not before PRing)
+
+- [`notes/mwccarm-codegen.md`](notes/mwccarm-codegen.md) — the codegen levers (u64-mask
+  laundering, declaration/statement order for register coloring, `//cpp` dummy-vtable
+  dispatch, struct-copy interleave).
+- [`notes/pret-idioms.md`](notes/pret-idioms.md) — mwccarm idioms mined from pret decomps.
+- [`notes/matching-style.md`](notes/matching-style.md) "Known walls" — patterns proven
+  unreachable from source. If your **only** divergence is one of those, it's a wall:
+  store the near-miss and hand it to the permuter instead of grinding.
