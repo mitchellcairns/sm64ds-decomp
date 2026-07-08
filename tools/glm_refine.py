@@ -22,7 +22,7 @@ Usage:
                              [--attempts 6] [--out progress/glm_refine.output]
   python tools/crackloop.py land --output progress/glm_refine.output --refine
 """
-import argparse, concurrent.futures, json, os, pathlib, re, subprocess, sys, threading, time
+import argparse, concurrent.futures, json, os, pathlib, random, re, subprocess, sys, threading, time
 
 import requests
 
@@ -131,7 +131,7 @@ def extract(reply):
     return src, note, floor
 
 
-def chat(messages, max_tokens=8000, retries=4):
+def chat(messages, max_tokens=8000, retries=8):
     url = BASE_URL.rstrip("/") + "/v1/messages"
     headers = {"x-api-key": API_KEY, "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
@@ -141,9 +141,17 @@ def chat(messages, max_tokens=8000, retries=4):
         body["thinking"] = think
         if _IS_ANTHROPIC:
             body["temperature"] = 1  # Anthropic requires temperature=1 when thinking is on
+    # Rate-limit resilience: with several parallel workers the API 429s a lot. Back off with
+    # jitter and honor Retry-After so a throttled request recovers instead of erroring the whole
+    # function. Network hiccups are treated the same as a retryable 5xx.
     delay = 5
     for i in range(retries):
-        r = requests.post(url, headers=headers, json=body, timeout=600)
+        try:
+            r = requests.post(url, headers=headers, json=body, timeout=600)
+        except requests.RequestException:
+            if i == retries - 1:
+                raise RuntimeError("GLM API: network error, retries exhausted")
+            time.sleep(delay + random.uniform(0, 3)); delay = min(delay * 2, 120); continue
         if r.status_code == 200:
             data = r.json()
             text = "".join(b.get("text", "") for b in data.get("content", [])
@@ -151,14 +159,16 @@ def chat(messages, max_tokens=8000, retries=4):
             u = data.get("usage", {})
             return text, u.get("input_tokens", 0), u.get("output_tokens", 0)
         if r.status_code in (429, 500, 502, 503, 529):
-            time.sleep(delay); delay = min(delay * 2, 120); continue
+            ra = r.headers.get("retry-after", "")
+            wait = float(ra) if ra.replace(".", "", 1).isdigit() else delay
+            time.sleep(min(wait, 120) + random.uniform(0, 3)); delay = min(delay * 2, 120); continue
         if r.status_code == 402 or "insufficient" in r.text.lower():
             raise RuntimeError("BALANCE_EXHAUSTED")
         # Model rejected the reasoning param -> drop it and retry without extended thinking.
         if r.status_code == 400 and "thinking" in body:
             body.pop("thinking", None); body.pop("temperature", None); continue
         raise RuntimeError(f"GLM API {r.status_code}: {r.text[:300]}")
-    raise RuntimeError("GLM API: retries exhausted")
+    raise RuntimeError("GLM API: rate-limited, retries exhausted")
 
 
 DIV_RE = re.compile(r"NOMATCH divergences=(\d+)")
@@ -193,12 +203,26 @@ def crack_one(name, wl, attempts, row):
                      f"disasm, callee sigs, pool slots, stored draft) ===\n{ctx}\n\n"
                      f"=== CURRENT DRAFT (divergences={best_div}) ===\n{draft}\n\n"
                      f"=== VERIFIER OUTPUT ===\n{vout}"}]
-        note, stale = "", 0
+        note, stale, apierr = "", 0, 0
         for att in range(1, attempts + 1):
-            reply, i_tok, o_tok = chat(messages)
+            # Per-attempt error handling: a rate-limit/network error on one attempt must NOT sink
+            # the whole function (the old behavior: div=999 with zero logged attempts). Log it and
+            # keep going, up to a few consecutive failures. BALANCE_EXHAUSTED still hard-stops.
+            try:
+                reply, i_tok, o_tok = chat(messages)
+            except RuntimeError as e:
+                if "BALANCE_EXHAUSTED" in str(e):
+                    raise
+                apierr += 1
+                att_log.append(f"attempt {att}: api error - {str(e)[:50]}")
+                if apierr >= 3:
+                    break
+                continue
+            apierr = 0
             t_in += i_tok; t_out += o_tok
             src, note, floor = extract(reply)
             if not src:
+                att_log.append(f"attempt {att}: no code block returned")
                 messages.append({"role": "assistant", "content": reply})
                 messages.append({"role": "user", "content":
                                  "No code block found. Reply with the complete source file "
