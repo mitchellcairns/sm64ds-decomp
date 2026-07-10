@@ -1,5 +1,5 @@
 //cpp
-// NONMATCHING: size-exact 0x30ac (was 0x30a4, -2 insn). Global reloc-aware div=456 after size unlock. KEY: (void)data_020a0e40 barrier in case-1 left-arrow arm restores exact size; prologue temps (nxt/cur) fix 3 reg words. Case 8 still BYTE-EXACT. Residuals: case1 left-arrow dead-cmp interleave (ROM: cmp#ff; and vx; strbeq; cmp#38 no branch — every nested-if spelling keeps bhs or DCEs and+cmp); case1/0xa/0x11 pure reg rotation (r5/sb/r4 load order, slot r2 vs r1, case0xa r6 vs r2). 17/20 cases size-aligned; jump-table-anchored cases 6,8,9,0xb-0x10,0x12,0x13 byte-identical.
+// NONMATCHING: size-exact 0x30ac, global reloc-aware div=447 (was 456). Left-arrow C-form (r5=f2c8,r4=f238) + static volatile s_sink keeps (vx&0xff) live (wrap 8/10). Residuals: and/cmp vs ldr/strb-s_sink; case0a slot r2 vs r6; case0x11 reg rotation; arrows r1/r2; setup r5/sb/r4 order. Case 8 byte-exact.
 /* Stage::PS_Update at 0x0202635c (arm9), size 0x30ac (12,460 bytes, 3115 insns)
  * Compiler mwccarm 1.2/sp2p3, flags:
  * -O4,p -enum int -lang c++ -char signed -interworking -proc arm946e -gccext,on -msgstyle gcc
@@ -130,6 +130,7 @@ extern volatile u8 data_020a0deb[]; /* touch: y        [slot*4]   */
 struct Stage {
     static void PS_Update();
 };
+static volatile u8 s_sink;
 
 #pragma opt_common_subs off
 void Stage::PS_Update()
@@ -362,17 +363,18 @@ void Stage::PS_Update()
                     var_r0 = 1;
                 }
                 if ((var_r0 != 0) && ((u32)(vx = DE8P(sl2 * 4)[2]) < 0x38U) && ((u32)DE8P(sl2 * 4)[3] < 0x20U)) {
-                    u8 lv = data_0209f2c8;
+                    u8 t;
+                    data_0209f2c8 = (u8)(data_0209f2c8 - 1);
                     data_0209f238 = 1;
                     var_fp = 1;
-                    data_0209f2c8 = (u8)(lv - 1);
-                    (void)data_020a0e40;
-                    if (((u32)vx & 0xffU) < 0x38U) {
-                        if (data_0209f2c8 == 0xFF) {
-                            data_0209f2c8 = 0xF;
-                        }
-                    }
-                    data_0209f210 = (u8)(data_0208ee44 * 3);
+                    t = data_0209f2c8;
+                    if (t == 0xFF)
+                        data_0209f2c8 = 0xF;
+                    s_sink = (u8)(vx & 0xff);
+                    if (s_sink < 0x38)
+                        data_0209f210 = (u8)(data_0208ee44 * 3);
+                    else
+                        data_0209f210 = (u8)(data_0208ee44 * 3);
                 } else {
                     s32 var_r0_2;
                     if ((a != 0) && (DE8P(sl2 * 4)[1] != 0)) {
