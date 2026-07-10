@@ -1,36 +1,31 @@
 //cpp
-// NONMATCHING: size-exact 0x30ac (was 0x30a4, -2 insn). Global reloc-aware div=456 after size unlock. KEY: (void)data_020a0e40 barrier in case-1 left-arrow arm restores exact size; prologue temps (nxt/cur) fix 3 reg words. Case 8 still BYTE-EXACT. Residuals: case1 left-arrow dead-cmp interleave (ROM: cmp#ff; and vx; strbeq; cmp#38 no branch — every nested-if spelling keeps bhs or DCEs and+cmp); case1/0xa/0x11 pure reg rotation (r5/sb/r4 load order, slot r2 vs r1, case0xa r6 vs r2). 17/20 cases size-aligned; jump-table-anchored cases 6,8,9,0xb-0x10,0x12,0x13 byte-identical.
-/* Stage::PS_Update at 0x0202635c (arm9), size 0x30ac (12,460 bytes, 3115 insns)
- * Compiler mwccarm 1.2/sp2p3, flags:
- * -O4,p -enum int -lang c++ -char signed -interworking -proc arm946e -gccext,on -msgstyle gcc
+// NONMATCHING: size-exact 0x30ac, mismatch count 2 (case-1 preheader ldr pair order).
+// Cases 0/2/3/8/0xa..0x13 BYTE-EXACT.
+/*
+ * Stage::PS_Update @ 0x0202635c size 0x30ac, mwccarm 1.2/sp2p3 -O4,p -lang c++
  *
- * Full decompilation of the pause-screen state machine: 6 timer blocks +
- * a 20-case switch on data_0209f248. Byte-identical regions: prologue,
- * timers, jump table, cases 0,2,3,4,5,6,9,0xb,0xc,0xd,0xe,0xf,0x10,0x12,
- * 0x13 and the shared tail.
+ * 2026-07-10 refine (69 -> 2):
+ *   1) sel3_0 stored data_0209f1ec = 2 but ROM stores data_0209f2c4 = 2 (pool
+ *      slot 0x9a8). Semantic fix, not regperm: match.py wildcards reloc slots,
+ *      so only the ldr displacement field betrayed it (+0xc48).
+ *   2) backlight_on guard reads the STALE tmpv (= tx - 0x6e, left from the
+ *      snd_next chain guard), NOT t6. Writing "tmpv = tx - 0x6e;
+ *      if ((u8)tmpv < 0x7c)" at the chain guard and "(u8)tmpv < 0x3c" at
+ *      backlight_on extends tmpv's live range r0-shaped and flipped the whole
+ *      case-0xa tx/ty cascade (tx=r3, ty reloads=r2) in one move: 68 -> 3.
+ *   3) opt_okback first deb check reads data_020a0deb[data_020a0e40 * 4]
+ *      DIRECTLY (volatile e40 reload indexes the ldrb, +0x26e4); the old
+ *      "u8 s4 = e40; (void)s4" kept slot/r6 as index. With (2) in place the
+ *      direct read no longer drops slot's r6 coloring.
  *
- * Working notes for the refine tier:
- * - Dead compare tails after each button-select come from
- *   `if ((u8)(dea[...]-K) < N) return; return;` (tail-merge keeps the cmp;
- *   bare expressions and empty ifs are DCE'd; identical-arms if/else inside
- *   a loop merges WITHOUT the cmp - that is case 1's remaining dead-cmp).
- * - data_020a0e40/dea/deb behave volatile; de8/de9 do not (ROM reuses their
- *   loads across blocks). Mixed extern decls below reflect that.
- * - Case 8/0xa wall: the ROM's language arms are 6 insns (no lsl); slot*4
- *   is materialized once at the join and REMATERIALIZED per mode block
- *   (r0 at the join, fresh lsl inside each block after calls clobber it).
- *   Every spelling tried (idx var before/after ty, no idx var, int slot,
- *   per-arm slot locals+merge) hoists one lsl into each language arm and
- *   keeps a long-lived idx register instead. 3 extra insns x 2 cases, and
- *   it perturbs the whole-case register rotation.
- * - Case 8 mode blocks decoded: `if (a==0) goto change; t=1;
- *   if (!(a && de9[idx])) t=0; if (t==0) goto keep;
- *   if (f2dc != MODE) goto keep; change: ... keep: ...` - this shape now
- *   matches the ROM's control flow exactly (cmp/beq/cmp/beq chain).
- * - Frame is 0x14: five named constant locals (0,0,0,0x51,0x52) in case 1
- *   spill to [sp..sp+0x10]; 0xf/1/2 live in r7/r8/r6. Restructuring case-1
- *   temps can silently drop spill slots and shift every add sp - check
- *   `sub sp,#0x14` first after any case-1 edit. */
+ * Residual (2 words, +0x7ac/+0x7b0): case-1 preheader emits ldr r4(&f238)
+ *   before ldr sb(&de8); ROM emits sb first. Colors MATCH (r5=f2c8,r4=f238,
+ *   sb=de8); pool layout MATCH; body of case1 MATCH including interleaved
+ *   f238-store-before-f2c8-store. Pure independent-ldr schedule residual.
+ *   Named-ptr assigns can get symbol order f2c8,de8,f238 but steal high regs
+ *   and/or fire before mov fp. Direct globals keep colors+placement but always
+ *   emit f238 before de8. See scratch/HANDOFF_Stage_PS_Update.md.
+ */
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef signed char s8;
@@ -94,6 +89,7 @@ extern u8 data_0209f240;
 extern u8 data_0209f244;           /* timer: button flash */
 extern u8 data_0209f248;           /* current pause state */
 extern u8 data_0209f250;
+extern s16 data_02092144[];
 extern u8 data_0209f280;
 extern u8 data_0209f29c;
 extern u8 data_0209f2a4;
@@ -354,25 +350,34 @@ void Stage::PS_Update()
                 u8 sl2;
                 u8 a;
                 u8 vx;
-                var_r0 = sp0;
-                sl2 = data_020a0e40;
-                de_off = sl2 * 4;
-                a = data_020a0de8[sl2 * 4];
+                {
+                    volatile u8 *pe40 = &data_020a0e40;
+                    volatile s32 *psp = &sp0;
+                    var_r0 = *psp;
+                    sl2 = *pe40;
+                    {
+                        register u8 aa = data_020a0de8[sl2 * 4];
+                        a = aa;
+                    }
+                    de_off = sl2 * 4;
+                }
                 if ((a != 0) && (DE8P(de_off)[1] != 0)) {
                     var_r0 = 1;
                 }
                 if ((var_r0 != 0) && ((u32)(vx = DE8P(sl2 * 4)[2]) < 0x38U) && ((u32)DE8P(sl2 * 4)[3] < 0x20U)) {
-                    u8 lv = data_0209f2c8;
+                    u8 t;
+                    data_0209f2c8 = (u8)(data_0209f2c8 - 1);
                     data_0209f238 = 1;
                     var_fp = 1;
-                    data_0209f2c8 = (u8)(lv - 1);
-                    (void)data_020a0e40;
-                    if (((u32)vx & 0xffU) < 0x38U) {
-                        if (data_0209f2c8 == 0xFF) {
-                            data_0209f2c8 = 0xF;
-                        }
+                    t = data_0209f2c8;
+                    if (t == 0xFF)
+                        data_0209f2c8 = 0xF;
+                    {
+                        u8 *p0 = &data_0209f210;
+                        u8 *p1 = &data_0209f210;
+                        u8 *p = ((u8)(vx & 0xff) < 0x38) ? p0 : p1;
+                        *p = (u8)(data_0208ee44 * 3);
                     }
-                    data_0209f210 = (u8)(data_0208ee44 * 3);
                 } else {
                     s32 var_r0_2;
                     if ((a != 0) && (DE8P(sl2 * 4)[1] != 0)) {
@@ -409,9 +414,9 @@ void Stage::PS_Update()
     }
     case 2: {
         REG16(0x400100a) = (REG16(0x400100a) & 0x43) | 0xc00;
-        REG16(0x400000a) = (REG16(0x400000a) & 0x43) | 0x1210;
+        REG16(0x400000c) = (REG16(0x400000c) & 0x43) | 0x1010;
         data_0209f1ec = 3;
-        data_0209f2c8 = SublevelToLevel(data_02092124);
+        data_0209f2c8 = SublevelToLevel(data_0209f2f8);
         _ZN7Message16DisplayPauseTextEth(0x277, data_0209f2c8);
         data_0209f360[0] = 0x60;
         data_0209f360[1] = 0x100;
@@ -422,7 +427,7 @@ void Stage::PS_Update()
         _ZN5Stage17UpdateMenuButtonsEb(1);
         SetBg3Offset(0, 0);
         data_0209d45c |= 8;
-        if (func_02029408() != 0 && data_020756d0[data_0209f2c8] != 0) {
+        if (func_02029408() != 0 && data_02092144[data_0209f250] != 0) {
             SetBg2Offset(0, 0);
             SetSubBg0Offset(0, 0);
             SetSubBg1Offset(0, 0);
@@ -462,7 +467,7 @@ void Stage::PS_Update()
             data_0209f2e0 = 0;
             _ZN5Stage17UpdateMenuButtonsEb(0);
             data_0209f22c = data_0208ee44 << 3;
-            data_0209f1ec = 2;
+            data_0209f2c4 = 2;
             func_02012790(3);
             if ((u8)(data_020a0dea[data_020a0e40 * 4] - 8) < 0xf0)
                 return;
@@ -1010,7 +1015,8 @@ void Stage::PS_Update()
                 if ((u8)(ty2 - 0x2e) < 0x14)
                     goto snd_next;
             }
-            if ((u8)(tx - 0x6e) < 0x7c) {
+            tmpv = tx - 0x6e;
+            if ((u8)tmpv < 0x7c) {
                 ty2 = data_020a0deb[slot * 4];
                 if ((u8)(ty2 - 0x26) < 0x24)
                     goto snd_next;
@@ -1073,7 +1079,7 @@ void Stage::PS_Update()
                 return;
             }
         backlight_on:
-            if ((u8)t6 < 0x3c) {
+            if ((u8)tmpv < 0x3c) {
                 u8 ty2b = data_020a0deb[slot * 4];
                 if ((u8)(ty2b - 0x56) < 0x24) {
                 tmpv = tx - 0x70;
@@ -1143,7 +1149,7 @@ void Stage::PS_Update()
                 }
             }
         chk_bl_off2:
-            if ((u8)tmpv < 0x4c) {
+            if ((u8)t6 < 0x4c) {
                 u8 ty4 = data_020a0deb[slot * 4];
                 if ((u8)(ty4 - 0x56) < 0x24) {
                     tmpv = tx - 8;
@@ -1200,8 +1206,7 @@ void Stage::PS_Update()
                     return;
             opt_okback:
                 if (relx < firstw) {
-                    u8 s4 = data_020a0e40;
-                    if ((u8)(data_020a0deb[s4 * 4] - 0x98) < 0x20)
+                    if ((u8)(data_020a0deb[data_020a0e40 * 4] - 0x98) < 0x20)
                         goto set29c;
                 }
                 if (IsButtonInputValid() != 0) {
@@ -1395,10 +1400,12 @@ void Stage::PS_Update()
             }
         }
         {
-            int rely;
+            register u8 slot;
+            register u8 tx;
             int rel;
-            u8 slot = data_020a0e40;
-            u8 tx = data_020a0dea[slot * 4];
+            int rely;
+            slot = data_020a0e40;
+            tx = data_020a0dea[slot * 4];
             rel = tx - 0x28;
             if ((u8)rel < 0x50) {
                 rely = data_020a0deb[slot * 4] - 0x98;
