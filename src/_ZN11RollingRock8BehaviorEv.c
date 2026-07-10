@@ -1,6 +1,4 @@
-// NONMATCHING: extra logic (you do more) (div=47). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
+// NONMATCHING: size 0x2d4 vs target 0x2d8 (missing one pool word, likely 0x3bf offset materialization) (div=size)
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
