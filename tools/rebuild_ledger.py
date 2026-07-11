@@ -49,9 +49,14 @@ def main():
             if not m:
                 continue
             name, size, addr = m.group(1), int(m.group(2), 16), int(m.group(3), 16)
-            src = next((SRC / f"{name}.{ext}" for ext in ("c", "cpp")
-                        if (SRC / f"{name}.{ext}").is_file()), None)
-            if src is None or "NONMATCHING" in src.read_text(errors="ignore")[:200]:
+            # A function is matched if ANY committed sibling is a real match; a stale
+            # NONMATCHING draft (e.g. src/NAME.c) can shadow a landed match (NAME.cpp),
+            # so never let the first extension found decide it (chaos_db_ci.py has the
+            # same .c-first blind spot -- see tools/rebuild_ledger).
+            srcs = [SRC / f"{name}.{ext}" for ext in ("c", "cpp")
+                    if (SRC / f"{name}.{ext}").is_file()]
+            if not any("NONMATCHING" not in f.read_text(errors="ignore")[:200]
+                       for f in srcs):
                 continue
             key = (label, addr)
             if key in seen:
