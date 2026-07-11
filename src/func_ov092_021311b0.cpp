@@ -1,6 +1,7 @@
 //cpp
-// NONMATCHING: size 0x1dc vs 0x200 (delta -36); angle-add pointer shape and stack frame (0x18 vs 0x24) residuals
 struct Vector3 { int x, y, z; };
+typedef short s16;
+#define LA(p) (((long long)(int)(p)) & 0xFFFFFFFFFFFFFFFFLL)
 extern "C" {
 void _ZN5Actor9UpdatePosEP12CylinderClsn(void *self, void *clsn);
 int _ZNK12WithMeshClsn8IsOnWallEv(void *self);
@@ -13,25 +14,25 @@ int func_02037e38(void *p);
 int func_02037e84(void *p);
 void func_0203568c(void *p, int v);
 void _ZN5Actor10EarthquakeERK7Vector35Fix12IiE(void *self, Vector3 *pos, int fix);
-void Particle_System_NewSimple(unsigned int a, int b, int cc, int d);
+void _ZN8Particle6System9NewSimpleEj5Fix12IiES2_S2_(unsigned int a, int b, int cc, int d);
 void func_020383fc(void *self);
 void func_02012694(int a, void *pos);
 }
 extern "C" void func_ov092_021311b0(void *thiz)
 {
     char *c = (char *)thiz;
-    int saved[3];
+    volatile int saved[3];
+    Vector3 v1;
+    Vector3 v2;
     char *fr;
-    Vector3 v;
 
     {
-        short *ip = (short *)(c + 0x8c);
-        short *base = (short *)(c + 0x400);
-        short *lr = (short *)(c + 0x8e);
-        short *r5 = (short *)(c + 0x90);
-        *ip = (short)(*ip + base[0xe0/2]);
-        *lr = (short)(*lr + base[0xe2/2]);
-        *r5 = (short)(*r5 + base[0xe4/2]);
+        s16 *p8c = (s16 *)LA(c + 0x8c);
+        s16 *p8e = (s16 *)LA(c + 0x8e);
+        s16 *p90 = (s16 *)LA(c + 0x90);
+        *p8c += ((s16 *)(c + 0x400))[0xe0 / 2];
+        *p8e += ((s16 *)(c + 0x400))[0xe2 / 2];
+        *p90 += ((s16 *)(c + 0x400))[0xe4 / 2];
     }
 
     _ZN5Actor9UpdatePosEP12CylinderClsn(c, 0);
@@ -67,11 +68,11 @@ extern "C" void func_ov092_021311b0(void *thiz)
         *(int *)(c + 0x568) = 7;
         func_0203568c(c + 0x324, 0x78000);
         o = *(char **)(c + 0x320);
-        p = (int *)(o + 0x5c);
-        v.x = p[0];
-        v.y = p[1];
-        v.z = p[2];
-        _ZN5Actor10EarthquakeERK7Vector35Fix12IiE(c, &v, 0xff8000);
+        p = (int *)LA(o + 0x5c);
+        v1.x = p[0];
+        v1.y = p[1];
+        v1.z = p[2];
+        _ZN5Actor10EarthquakeERK7Vector35Fix12IiE(c, &v1, 0xff8000);
         *(int *)(c + 0x5c) = saved[0];
         *(int *)(c + 0x60) = saved[1];
         *(int *)(c + 0x64) = saved[2];
@@ -80,14 +81,14 @@ extern "C" void func_ov092_021311b0(void *thiz)
         char *o;
         int *p;
         _ZN5Actor14TriplePoofDustEv(c);
-        Particle_System_NewSimple(0xfa, *(int *)(c + 0x5c), *(int *)(c + 0x60), *(int *)(c + 0x64));
+        _ZN8Particle6System9NewSimpleEj5Fix12IiES2_S2_(0xfa, *(int *)(c + 0x5c), *(int *)(c + 0x60), *(int *)(c + 0x64));
         _ZN9ActorBase18MarkForDestructionEv(c);
         o = *(char **)(c + 0x320);
-        p = (int *)(o + 0x5c);
-        v.x = p[0];
-        v.y = p[1];
-        v.z = p[2];
-        _ZN5Actor10EarthquakeERK7Vector35Fix12IiE(c, &v, 0xff8000);
+        p = (int *)LA(o + 0x5c);
+        v2.x = p[0];
+        v2.y = p[1];
+        v2.z = p[2];
+        _ZN5Actor10EarthquakeERK7Vector35Fix12IiE(c, &v2, 0xff8000);
         _ZN5Sound9PlayBank3EjRK7Vector3(0x41, c + 0x74);
     }
     *(int *)(c + 0x320) = 0;
