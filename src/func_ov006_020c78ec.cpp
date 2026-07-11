@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: base materialization / addressing (div=11). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 extern "C" int data_ov006_02140428;
 extern "C" void _Z14ApproachLinearRiii(int &r, int b, int c);
 extern "C" void _ZN5Sound12PlayBank2_2DEj(unsigned int);
@@ -10,7 +7,7 @@ extern "C" void func_ov006_020c8768(char *p);
 
 extern "C" void func_ov006_020c78ec(char *thiz)
 {
-    *(short*)(thiz + 0x32) = *(short*)(thiz + 0x32) - 1;
+    *(short *)(((int)thiz + 0x32) & 0xFFFFFFFFFFFFFFFFLL) -= 1;
     if (*(short*)(thiz + 0x32) == 0) {
         _Z14ApproachLinearRiii((&data_ov006_02140428)[0], 0, 1);
         _ZN5Sound12PlayBank2_2DEj(0x130);

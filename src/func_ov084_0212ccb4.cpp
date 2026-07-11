@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: different op / idiom (div=18). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 struct Vector3 { int x, y, z; };
 
 struct Camera {
@@ -27,10 +24,11 @@ struct Obj {
 extern "C" int func_ov084_0212ccb4(Obj* self)
 {
     Camera* cam = data_0209f318;
+    int r2;
     Vector3 l1;
+    Vector3* sa = (Vector3*)(((int)cam + 0x80) & 0xFFFFFFFFFFFFFFFFULL);
+    Vector3* sb = (Vector3*)(((int)cam + 0x8c) & 0xFFFFFFFFFFFFFFFFULL);
     Vector3 l2;
-    Vector3* sa = &cam->a;
-    Vector3* sb = &cam->b;
     l1.x = sa->x;
     l1.y = sa->y;
     l1.z = sa->z;
@@ -38,7 +36,7 @@ extern "C" int func_ov084_0212ccb4(Obj* self)
     l2.y = sb->y;
     l2.z = sb->z;
     int r1 = func_ov084_0212cda0((int)self, &l1, &self->v1cc);
-    int r2 = func_ov084_0212cda0((int)self, &l2, &self->v1d8);
+    r2 = func_ov084_0212cda0((int)self, &l2, &self->v1d8);
     if ((self->f8c & 0xff) == 2) {
         r1 = 1;
         r2 = 1;

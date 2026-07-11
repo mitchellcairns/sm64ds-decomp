@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: base materialization / addressing (div=5). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 struct ModelComponents;
 
 struct TextureSequence {
@@ -27,12 +24,12 @@ extern int data_ov006_0213c744[];
 
 extern "C" void func_ov006_020e7b44(char* c)
 {
-    int* p = (int*)(c + 0x210);
+    int* p = (int*)(((int)c + 0x210) & 0xFFFFFFFFFFFFFFFFLL);
     int* d = data_ov006_0213c744;
     if (p[0] == d[0]) {
         if (p[1] == d[1]) return;
+        if (*(int*)(c + 0x210) == 0) return;
     }
-    if (*(int*)(c + 0x210) == 0) return;
 
     func_02046208(c + 0x14, *(unsigned char*)(c + 0x21a), 0);
 

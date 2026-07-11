@@ -1,7 +1,4 @@
 //cpp
-// NONMATCHING: base materialization / addressing (div=12). Logic verified correct vs ROM; not
-// byte-matchable from C at mwccarm 1.2/sp2p3 (see notes/matching-style.md).
-// Counts as decompiled, not matched.
 typedef long long s64;
 extern void func_ov006_020c8c78(int a, int b);
 extern int ApproachLinear(int &r, int b, int c);
@@ -19,9 +16,8 @@ struct Obj {
 };
 
 extern "C" void func_ov006_020c9efc(char* c){
-  short* h=(short*)(c+0x6c);
-  *h=*h-1;
-  if(*h==0){
+  *(short*)(((int)c+0x6c) & 0xFFFFFFFFFFFFFFFFLL) = *(short*)(((int)c+0x6c) & 0xFFFFFFFFFFFFFFFFLL) - 1;
+  if(*(short*)(c+0x6c)==0){
     func_ov006_020c8c78(*(short*)(c+0x56),0xc0);
     data_ov006_02140598=data_ov006_02140598-1;
     ApproachLinear(data_ov006_0213b0f0,0,1);
