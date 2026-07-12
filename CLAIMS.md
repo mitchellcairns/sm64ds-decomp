@@ -19,6 +19,7 @@ it is fair to take over: ping the claimant first.
 
 | Range | Who | Claimed | Status |
 |---|---|---|---|
+| ov095: func_ov095_021357d8 (0x021357d8), func_ov095_021358cc (0x021358cc), func_ov095_02135cdc (0x02135cdc), UpDownLiftBbh::InitResources (0x021365d8), Flamethrower::Behavior (0x021368f0), Flamethrower::InitResources (0x02136d60) | lunavyqo | 2026-07-12 | done (partial) — 357d8 + UpDownLift InitResources MATCH (PR #305); 35cdc near-miss div≈40 in DB; 358cc/Flamethrower still open |
 | ov019 func_ov019_02111558 (0x02111558, size 0x1fc) | lunavyqo | 2026-07-12 | done - verified byte-identical, draft PR |
 | _example: ov004 0x020b0000-0x020b8000_ | _handle_ | _2026-06-17_ | _example_ |
 | ov029 8 funcs (0x02111254-0x02112354) | lunavyqo | 2026-07-10 | done - verified byte-identical, PR #221 open |
@@ -72,7 +73,7 @@ it is fair to take over: ping the claimant first.
 | arm9 _ZN5Stage9PS_UpdateEv (0x0202635c, 0x30ac) | lunavyqo (AI-assisted) | 2026-07-10 | **active** mm=2 (was 69): fixed sel3_0 wrong-global f1ec→f2c4, stale-tmpv backlight guard flipped whole tx/ty cascade, direct e40 reload at opt_okback; residual = case-1 preheader ldr sb/r4 emission order (+0x7ac/+0x7b0); permuter hunting; handoff `scratch/HANDOFF_Stage_PS_Update.md` |
 | batch2 NONMATCHING near-misses: func_ov002_020bf224, func_ov007_020bc3dc, func_0205d304, _ZN16MeshColliderBase6EnableEP5Actor, func_0206e3dc | ruspecial (Claude-assisted) | 2026-07-06 | near-miss div=2-3 (regperm/predicated-order/schedule walls) |
 | batch2 matched: func_ov062_021161a8, func_ov062_02119628, func_ov020_021112b0, func_ov006_0210d6b8 | ruspecial (Claude-assisted) | 2026-07-06 | done - 4 verified byte-identical |
-| batch3 NONMATCHING near-misses: func_ov079_02126a84 (div2), func_ov095_021365d8 (div3) | ruspecial (Claude-assisted) | 2026-07-06 | scheduling residuals (arg-setup / store-hoist emission order) |
+| batch3 NONMATCHING near-misses: func_ov079_02126a84 (div2), func_ov095_021365d8 (div3) | ruspecial (Claude-assisted) | 2026-07-06 | 021365d8 / UpDownLiftBbh::InitResources matched in PR #305 (`/2` average); 02126a84 still scheduling residual |
 | batch3 matched: func_ov078_02125c98, func_ov060_021146d0, func_ov004_020b7cd0, _ZN3HUD15RenderCoinCountEv | ruspecial (Claude-assisted) | 2026-07-06 | done - 4 verified byte-identical |
 | ov001 func_ov001_020aa420 (0x020aa420, size 0x290) | lunavyqo (AI-assisted) | 2026-07-06 | done - verified byte-identical |
 | ov001 func_ov001_020aadac (0x020aadac-0x020aaf40) | lunavyqo | 2026-07-06 | done - verified byte-identical |
