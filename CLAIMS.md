@@ -19,6 +19,7 @@ it is fair to take over: ping the claimant first.
 
 | Range | Who | Claimed | Status |
 |---|---|---|---|
+| ov004: func_ov004_020af2f8 (0x020af2f8, size 0x2e8) | lunavyqo (Grok) | 2026-07-16 | **done** — verified byte-identical (mwccarm 1.2/sp2p3); claim clm_a25f174bbe49 kept active |
 | ov006 func_ov006_020fc8c0 (0x020fc8c0, size 0xf0) | Codex/Raman | 2026-07-16 | active — batch 11, free div=6 refinement |
 | arm9 func_02069918 (0x02069918, size 0x7c) | Codex/Lovelace | 2026-07-16 | released — required base-copy is optimized away; DB-best restored, no tracked change |
 | ov007 func_ov007_020b782c (0x020b782c, size 0xa4) | Codex/Lovelace | 2026-07-16 | active — batch 11 replacement, free div=8 refinement |
