@@ -1,4 +1,3 @@
-/* best near-miss div=2 @ mwccarm 1.2/sp2p3 — else-arm guard flip */
 extern int RandomIntInternal(int *seed);
 extern void _ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj(void *thiz, void *bca, int a, int fix, unsigned int b);
 extern void func_ov006_020ca2ec(void *c);
