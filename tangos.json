@@ -40,6 +40,7 @@
       "GLM_API_KEY",
       "DEEPSEEK_API_KEY",
       "NEMOTRON_API_KEY",
+      "REQUESTY_API_KEY",
       "CLAIMS_API_KEY"
     ],
     "envKeyHelp": {
@@ -60,6 +61,10 @@
       },
       "NEMOTRON_API_KEY": {
         "note": "Local Nemotron-3 via LM Studio (OpenAI-compatible server on localhost:1234, model 'nemo'). The server ignores the value, so any placeholder like 'lm-studio' works - storing it just switches the Nemotron box on and makes it console-drivable. Start LM Studio (Start-Nemotron.ps1) before driving."
+      },
+      "REQUESTY_API_KEY": {
+        "note": "Requesty gateway key (rqsty-sk-...). Gives you a Requesty box that fans each batch out across every free ($0) Requesty model at once and keeps the best result per function (tools/requesty_fanout.py). Stored encrypted.",
+        "url": "https://app.requesty.ai/api-keys"
       },
       "CLAIMS_API_KEY": {
         "note": "Write key for the tangos.dev claims board, so your locks post under your handle. Optional - read-only works without it."
