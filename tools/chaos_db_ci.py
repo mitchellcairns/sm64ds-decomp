@@ -108,30 +108,85 @@ def match_finishers() -> dict[str, str]:
     A finish is identified by content, not by message: the file carried the "// NONMATCHING"
     banner before the commit and does not after. Only commits that touch that banner are
     inspected (-G), so this is a few hundred blobs, not the whole history. Oldest-first, so
-    if a file is re-drafted and re-finished later, the LAST finisher wins."""
-    out = subprocess.run(
-        ["git", "log", "--reverse", "-G", "// NONMATCHING", "--diff-filter=M",
-         "--format=%x01%H%x02%an%x03%ae", "--name-only", "--", "src/"],
-        cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+    if a file is re-drafted and re-finished later, the LAST finisher wins.
+
+    EXTENSION CHANGES count too. Cracking a draft very often also corrects the extension -- a
+    C++ function drafted as .c becomes .cpp in the same commit that makes it match. Git reports
+    that either as a RENAME (small edit) or as a DELETE + ADD pair (rewritten enough that rename
+    detection gives up). Both were silently missed, because looking for the banner at the NEW
+    path's parent finds nothing there; for either shape the before-side must be read from the
+    OLD path. Renames are handled in the pickaxe pass, but the D+A shape CANNOT be: the pickaxe
+    lists only the files whose own diff contains the pattern, and the added .cpp is banner-free
+    by definition, so the add half is never reported and the pair can never be formed. Those get
+    their own unfiltered pass; there are only ~27 such pairs in all of history, so pairing is
+    cheap. Both passes credit through the same chronological guard, so a later re-draft and
+    re-finish still wins regardless of which pass saw it."""
+    order = {s: i for i, s in enumerate(subprocess.run(
+        ["git", "rev-list", "--reverse", "HEAD"], cwd=REPO, capture_output=True,
+        text=True, encoding="utf-8", errors="replace").stdout.split())}
+
     finishers: dict[str, str] = {}
-    sha = handle = None
-    for line in out.splitlines():
-        if line.startswith("\x01"):
-            sha, _, who = line[1:].partition("\x02")
-            name, _, email = who.partition("\x03")
-            handle = _handle_from(name, email)
-        elif handle and sha and line.strip().startswith("src/"):
-            path = line.strip()
-            after = subprocess.run(["git", "show", f"{sha}:{path}"], cwd=REPO,
-                                   capture_output=True, text=True, encoding="utf-8",
-                                   errors="replace").stdout[:200]
-            if "// NONMATCHING" in after:
-                continue                      # still a draft after this commit
-            before = subprocess.run(["git", "show", f"{sha}^:{path}"], cwd=REPO,
-                                    capture_output=True, text=True, encoding="utf-8",
-                                    errors="replace").stdout[:200]
-            if "// NONMATCHING" in before:    # banner was there, now gone -> this commit finished it
-                finishers[path] = handle
+    credited_at: dict[str, int] = {}
+
+    def blob(rev: str, path: str) -> str:
+        return subprocess.run(["git", "show", f"{rev}:{path}"], cwd=REPO, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace").stdout[:200]
+
+    def finished(sha: str, new: str, old: str) -> bool:
+        """True when `old` carried the banner before this commit and `new` does not after."""
+        if "// NONMATCHING" in blob(sha, new):
+            return False                      # still a draft after this commit
+        return "// NONMATCHING" in blob(f"{sha}^", old)
+
+    def credit(sha: str, handle: str, new: str, old: str) -> None:
+        i = order.get(sha, -1)
+        if new.startswith("src/") and i >= credited_at.get(new, -1) and finished(sha, new, old):
+            finishers[new], credited_at[new] = handle, i
+
+    def walk(argv, on_entry):
+        sha = handle = None
+        pending: list[tuple[str, list[str]]] = []
+        for line in subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace").stdout.splitlines():
+            if line.startswith("\x01"):
+                if sha:
+                    on_entry(sha, handle, pending)
+                pending = []
+                sha, _, who = line[1:].partition("\x02")
+                name, _, email = who.partition("\x03")
+                handle = _handle_from(name, email)
+                continue
+            if not (handle and sha and line.strip()):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2:
+                pending.append((parts[0], [p.strip() for p in parts[1:]]))
+        if sha:
+            on_entry(sha, handle, pending)
+
+    def modifies(sha, handle, entries):
+        for code, paths in entries:
+            if code.startswith("R") and len(paths) >= 2:
+                credit(sha, handle, paths[1], paths[0])   # banner moved path: compare across it
+            elif code.startswith("M"):
+                credit(sha, handle, paths[0], paths[0])
+
+    def pairs(sha, handle, entries):
+        """A draft deleted and a same-symbol file added in ONE commit is the extension-change
+        shape rename detection gave up on. Pair strictly on identical path-minus-extension, so
+        an unrelated delete can never be read as a finish."""
+        adds = [p[0] for c, p in entries if c.startswith("A")]
+        dels = [p[0] for c, p in entries if c.startswith("D")]
+        for d in dels:
+            base = d.rsplit(".", 1)[0]
+            for a in adds:
+                if a.rsplit(".", 1)[0] == base and a != d:
+                    credit(sha, handle, a, d)
+
+    walk(["git", "log", "--reverse", "-G", "// NONMATCHING", "--diff-filter=MR", "-M",
+          "--format=%x01%H%x02%an%x03%ae", "--name-status", "--", "src/"], modifies)
+    walk(["git", "log", "--reverse", "--diff-filter=AD",
+          "--format=%x01%H%x02%an%x03%ae", "--name-status", "--", "src/"], pairs)
     return finishers
 
 
