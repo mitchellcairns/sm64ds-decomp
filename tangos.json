@@ -42,6 +42,7 @@
       "NEMOTRON_API_KEY",
       "REQUESTY_API_KEY",
       "MOONSHOT_API_KEY",
+      "OPENAI_API_KEY",
       "CLAIMS_API_KEY"
     ],
     "envKeyHelp": {
@@ -70,6 +71,10 @@
       "MOONSHOT_API_KEY": {
         "note": "Moonshot AI key. Gives you a Kimi box driving kimi-k3 (OpenAI-compatible at api.moonshot.ai). Stored encrypted.",
         "url": "https://platform.moonshot.ai/console/api-keys"
+      },
+      "OPENAI_API_KEY": {
+        "note": "OpenAI API key. Gives you a GPT box driving gpt-5.6-luna. The effort dropdown maps to reasoning_effort (minimal/low/medium/high). Stored encrypted.",
+        "url": "https://platform.openai.com/api-keys"
       },
       "CLAIMS_API_KEY": {
         "note": "Write key for the tangos.dev claims board, so your locks post under your handle. Optional - read-only works without it."
