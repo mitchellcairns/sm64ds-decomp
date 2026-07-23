@@ -97,96 +97,109 @@ def first_matchers() -> dict[str, str]:
 
 
 def match_finishers() -> dict[str, str]:
-    """{'src/name.ext': handle} crediting whoever turned a NONMATCHING draft into a real
-    byte-match -- the person who actually FINISHED the function.
+    """{'src/name.ext': handle} crediting whoever FIRST turned a NONMATCHING draft into a
+    real byte-match -- the person who actually matched the function.
 
-    first_matchers() only sees add/delete/rename, so closing out a draft lands as a plain
-    MODIFY and credits nobody: the original draft's author kept the credit and the matcher
-    got zero. That is backwards for the refine tier, where converting a near-miss into a
-    byte-identical match is the hard part of the work.
+    first_matchers() credits whoever added a path first, which is wrong whenever that first
+    version was an unmatched draft: the file only becomes countable once someone removes the
+    banner, so the drafter would collect credit for a match somebody else made. A bulk import
+    of hundreds of drafts made that a large-scale misattribution rather than a rare one.
 
-    A finish is identified by content, not by message: the file carried the "// NONMATCHING"
-    banner before the commit and does not after. Only commits that touch that banner are
-    inspected (-G), so this is a few hundred blobs, not the whole history. Oldest-first, so
-    if a file is re-drafted and re-finished later, the LAST finisher wins.
+    A finish is identified by content, not by commit message: the path carried the
+    "// NONMATCHING" banner at some earlier point and does not at this commit. The FIRST such
+    transition wins, so re-touching an already-matched file never transfers credit.
 
-    EXTENSION CHANGES count too. Cracking a draft very often also corrects the extension -- a
-    C++ function drafted as .c becomes .cpp in the same commit that makes it match. Git reports
-    that either as a RENAME (small edit) or as a DELETE + ADD pair (rewritten enough that rename
-    detection gives up). Both were silently missed, because looking for the banner at the NEW
-    path's parent finds nothing there; for either shape the before-side must be read from the
-    OLD path. Renames are handled in the pickaxe pass, but the D+A shape CANNOT be: the pickaxe
-    lists only the files whose own diff contains the pattern, and the added .cpp is banner-free
-    by definition, so the add half is never reported and the pair can never be formed. Those get
-    their own unfiltered pass; there are only ~27 such pairs in all of history, so pairing is
-    cheap. Both passes credit through the same chronological guard, so a later re-draft and
-    re-finish still wins regardless of which pass saw it."""
-    order = {s: i for i, s in enumerate(subprocess.run(
-        ["git", "rev-list", "--reverse", "HEAD"], cwd=REPO, capture_output=True,
-        text=True, encoding="utf-8", errors="replace").stdout.split())}
+    This walks full history with per-path state rather than filtering diffs, because every
+    diff-shaped approach misses cases:
+      - `git log -- <path>` applies history simplification and silently prunes commits that
+        arrived through a merge. A match landing on a side branch that forked before the draft
+        existed is recorded as an ADD of an unbannered file, invisible to a MODIFY scan.
+      - the -G pickaxe lists only files whose own diff contains the pattern, so the newly added
+        byte-matching file -- banner-free by definition -- is never reported at all.
+    Draft state also has to follow the file across an extension change, which git records as a
+    rename when the edit is small and as a delete + add of the same base name when it is not.
 
+    Cost is one full-history log plus a single batched `git cat-file` for the blobs, so the
+    whole scan takes a couple of seconds rather than one subprocess per blob."""
+    REC, FLD, SUB = "\x01", "\x02", "\x03"
+    out = subprocess.run(
+        ["git", "log", "--full-history", "--reverse",
+         f"--format={REC}%H{FLD}%an{SUB}%ae", "--name-status", "-M", "--", "src/"],
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+
+    commits: list[tuple[str, str, list]] = []
+    sha = handle = None
+    ents: list = []
+    for line in out.splitlines():
+        if line.startswith(REC):
+            if sha:
+                commits.append((sha, handle, ents))
+            sha, _, rest = line[1:].partition(FLD)
+            name, _, email = rest.partition(SUB)
+            handle, ents = _handle_from(name, email), []
+            continue
+        if not sha or not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            ents.append((parts[0], [x.strip() for x in parts[1:]]))
+    if sha:
+        commits.append((sha, handle, ents))
+
+    def target(code: str, paths: list[str]) -> str:
+        return paths[1] if (code.startswith("R") and len(paths) >= 2) else paths[0]
+
+    want = sorted({(s, target(c, p)) for s, _, es in commits for c, p in es
+                   if not c.startswith("D")})
+    proc = subprocess.Popen(["git", "cat-file", "--batch"], cwd=REPO,
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    query = "".join(f"{s}:{p}" + "\n" for s, p in want).encode()
+    data, _ = proc.communicate(query)
+
+    state: dict[tuple[str, str], str | None] = {}
+    pos = idx = 0
+    while pos < len(data) and idx < len(want):
+        nl = data.find(b"\n", pos)
+        if nl < 0:
+            break
+        header = data[pos:nl].decode("utf-8", "replace")
+        pos = nl + 1
+        if header.endswith("missing"):
+            state[want[idx]] = None
+            idx += 1
+            continue
+        try:
+            size = int(header.rsplit(" ", 1)[1])
+        except (IndexError, ValueError):
+            break
+        state[want[idx]] = "draft" if b"// NONMATCHING" in data[pos:pos + 200] else "clean"
+        pos += size + 1
+        idx += 1
+
+    drafted: set[str] = set()
     finishers: dict[str, str] = {}
-    credited_at: dict[str, int] = {}
-
-    def blob(rev: str, path: str) -> str:
-        return subprocess.run(["git", "show", f"{rev}:{path}"], cwd=REPO, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace").stdout[:200]
-
-    def finished(sha: str, new: str, old: str) -> bool:
-        """True when `old` carried the banner before this commit and `new` does not after."""
-        if "// NONMATCHING" in blob(sha, new):
-            return False                      # still a draft after this commit
-        return "// NONMATCHING" in blob(f"{sha}^", old)
-
-    def credit(sha: str, handle: str, new: str, old: str) -> None:
-        i = order.get(sha, -1)
-        if new.startswith("src/") and i >= credited_at.get(new, -1) and finished(sha, new, old):
-            finishers[new], credited_at[new] = handle, i
-
-    def walk(argv, on_entry):
-        sha = handle = None
-        pending: list[tuple[str, list[str]]] = []
-        for line in subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
-                                   encoding="utf-8", errors="replace").stdout.splitlines():
-            if line.startswith("\x01"):
-                if sha:
-                    on_entry(sha, handle, pending)
-                pending = []
-                sha, _, who = line[1:].partition("\x02")
-                name, _, email = who.partition("\x03")
-                handle = _handle_from(name, email)
+    for sha, handle, ents in commits:
+        for code, paths in ents:                       # an extension change keeps its history
+            if code.startswith("R") and len(paths) >= 2 and paths[0] in drafted:
+                drafted.add(paths[1])
+        dels = [p[0] for c, p in ents if c.startswith("D")]
+        adds = [p[0] for c, p in ents if c.startswith("A")]
+        for d in dels:                                 # ...whether git called it a rename or not
+            if d not in drafted:
                 continue
-            if not (handle and sha and line.strip()):
-                continue
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) >= 2:
-                pending.append((parts[0], [p.strip() for p in parts[1:]]))
-        if sha:
-            on_entry(sha, handle, pending)
-
-    def modifies(sha, handle, entries):
-        for code, paths in entries:
-            if code.startswith("R") and len(paths) >= 2:
-                credit(sha, handle, paths[1], paths[0])   # banner moved path: compare across it
-            elif code.startswith("M"):
-                credit(sha, handle, paths[0], paths[0])
-
-    def pairs(sha, handle, entries):
-        """A draft deleted and a same-symbol file added in ONE commit is the extension-change
-        shape rename detection gave up on. Pair strictly on identical path-minus-extension, so
-        an unrelated delete can never be read as a finish."""
-        adds = [p[0] for c, p in entries if c.startswith("A")]
-        dels = [p[0] for c, p in entries if c.startswith("D")]
-        for d in dels:
             base = d.rsplit(".", 1)[0]
             for a in adds:
-                if a.rsplit(".", 1)[0] == base and a != d:
-                    credit(sha, handle, a, d)
-
-    walk(["git", "log", "--reverse", "-G", "// NONMATCHING", "--diff-filter=MR", "-M",
-          "--format=%x01%H%x02%an%x03%ae", "--name-status", "--", "src/"], modifies)
-    walk(["git", "log", "--reverse", "--diff-filter=AD",
-          "--format=%x01%H%x02%an%x03%ae", "--name-status", "--", "src/"], pairs)
+                if a != d and a.rsplit(".", 1)[0] == base:
+                    drafted.add(a)
+        for code, paths in ents:
+            if code.startswith("D"):
+                continue                               # a delete never clears the draft history
+            new = target(code, paths)
+            blob = state.get((sha, new))
+            if blob == "draft":
+                drafted.add(new)
+            elif blob == "clean" and new in drafted and new not in finishers:
+                finishers[new] = handle
     return finishers
 
 
