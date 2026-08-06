@@ -13,11 +13,11 @@ Every number below is reproducible on a clean tree at `7b293af4`. Commands in §
 
 | # | Claim | Verdict | Evidence |
 |---|---|---|---|
-| 1 | Name mangling proves C++, ignored | **Holds, partially** | 1,044 of 2,515 mangled-symbol files (41%) have a `.c` extension: the mangled name is spelled by hand and the file builds in C mode |
+| 1 | Name mangling proves C++, ignored | **Holds** | 1,359 of 2,515 mangled-symbol files (54%) still spell the mangled name by hand — 1,044 in `.c` files, and 315 more in `.cpp` files that renamed the extension and nothing else |
 | 2 | Incorrect return types | **Holds** | `int _ZN10FaderColorD1Ev(int *self)` — the ARM C++ dtor ABI returns `this`, so this is `FaderColor* FaderColor::~FaderColor()` |
 | 3 | Forced register usage | **Holds, smaller than stated** | 14 files carry inline `asm`; 67 name a codegen-forcing hack in a comment; 1,246 use `long long` (an unknown subset legitimately) |
 | 4 | Incorrect argument types | **Holds** | `int *self` for `FaderColor*`; and per the runbook, 27% of local declarations contradict each other |
-| 5 | Using a C compiler for C++ | **Holds in substance** | mwccarm does compile both, so "wrong compiler" is imprecise — but 8,125 files build as C and 1,044 of them define a C++ symbol. The mode is wrong where it matters |
+| 5 | Using a C compiler for C++ | **Holds in substance** | mwccarm does compile both, so "wrong compiler" is imprecise — but 8,125 files build as C and 1,044 of them define a C++ symbol. The mode is wrong where it matters, and the follow-up jab that `//cpp` "changes nothing" is right for 315 files |
 
 What does **not** survive: *"every single function is fake matched."* The byte gate is
 real and it is honest. 1,059 files already carry real C++ definitions, 79 of them real
@@ -31,26 +31,44 @@ changes what the source *claims*, and the byte gate is what proves each step did
 
 ## 2. The measured backlog
 
-**1,044 mangled-symbol files still in C mode**, by symbol kind:
+Run `python tools/langmode_audit.py` for the live numbers; it is the authority and this
+section is its output at `7b293af4`. **The backlog is 1,359 files — 54% of all
+mangled-symbol files — not the 1,044 that a file-extension count suggests.**
 
-| kind | count | migration status |
-|---|---|---|
-| plain methods | 579 | **proven** — 1,059 real method/namespace definitions landed |
-| `D0` deleting dtor | 246 | **proven** — 15 landed |
-| `D1` complete dtor | 170 | **proven** — 90 landed |
-| `D2` base dtor | 15 | **proven** — 2 landed |
-| `C1` complete ctor | 28 | **UNPROVEN — 0 landed** |
-| `C2` base ctor | 6 | **UNPROVEN — 0 landed** |
+The extension is not the test. A migration means *the compiler mangles the name for you*;
+a file that renamed itself `.cpp` and still writes `extern "C" void
+_ZN5ActorC1Ev(Actor *self) {` has changed nothing that #821 complained about. Counted
+honestly:
 
-Of the 579 methods, **36 carry `Fix12<int>` by value** and are blocked by the dead end in
-runbook §7 (mwccarm homes `r0-r3` to the stack for any by-value class parameter, +0x14,
-re-measured across all 25 sweep versions and every optimization level). They are not
-work; they are a documented exclusion.
+| population | count |
+|---|---|
+| `.c` extension, mangled symbol | 1,044 |
+| `.cpp` extension, symbol still hand-spelled | 315 |
+| **not migrated, total** | **1,359** of 2,515 (54.0%) |
 
-"Unproven" for constructors is literal. All five `C1` files that already carry a `.cpp`
-extension still hand-spell the mangled symbol — `extern "C" void*
-_ZN5ActorC1Ev(struct Actor *self)` — and `src/_ZN9ActorBaseC1Ev.cpp` uses `asm`. Renaming
-a file to `.cpp` was never the same thing as migrating it.
+By symbol kind, with what is actually *proven* — a genuinely migrated file that is not a
+`// NONMATCHING` draft:
+
+| kind | unmigrated | proven | status |
+|---|---|---|---|
+| plain methods | 842 | 1,079 | **proven at scale** |
+| `D1` complete dtor | 188 | 72 | **proven** |
+| `D0` deleting dtor | 258 | 3 | **barely proven** — treat as near-research |
+| `D2` base dtor | 17 | 0 | **UNPROVEN** |
+| `C1` complete ctor | 41 | 0 | **UNPROVEN** |
+| `C2` base ctor | 11 | 0 | **UNPROVEN** |
+| `C3` | 2 | 0 | **UNPROVEN** |
+
+**57 files are excluded, not backlog:** they take a class by value, the runbook §7 dead
+end (mwccarm homes `r0-r3` to the stack, +0x14, on all 25 sweep versions at every
+optimization level). `--list excluded` names them.
+
+"Unproven" is literal and it survived scrutiny. Every `.cpp` file for every constructor
+variant still hand-spells its symbol; `src/_ZN9ActorBaseC1Ev.cpp` is hand-written `asm`
+and marked `// NONMATCHING`, so it is a draft, not a match. **No constructor has ever
+been migrated in this tree.** The same is true of `D2`. And `D0` — 258 outstanding
+against 3 proven — is far weaker than its volume suggests, because the deleting
+destructor also has to get `operator delete` right.
 
 **A second, quieter backlog.** The proven destructor pattern often bought its bytes with a
 new lie. `src/_ZN6CannonD1Ev.cpp` is a genuine `Cannon::~Cannon()`, but it re-declares its
@@ -60,10 +78,11 @@ own base locally rather than including the real header:
 struct Actor { char pad[0xd0]; virtual ~Actor(); };
 ```
 
-Tree-wide: **1,426** `.cpp` files define a struct or class body locally, **770** do so
-while including no project header at all, and **690** use a `char pad[0x..]` shadow
-layout. A shadow base is invisible to `tools/affected_src.py`, so a later header fix
-silently misses it, and two files can disagree about the same class forever. This is the
+Tree-wide: **2,664** files define a struct or class body locally (1,446 of them `.cpp`),
+**1,641** do so while including no project header at all (776 `.cpp`), and **690** use a
+`char pad[0x..]` shadow layout. A shadow base is invisible to `tools/affected_src.py`, so
+a later header fix silently misses it, and two files can disagree about the same class
+forever. This is the
 same disease as the declaration debt in `notes/declaration-centralization.md` (**43,931**
 `extern` lines across **8,950** files at `7b293af4`, 27% mutually inconsistent,
 `ModelAnim::SetAnim` under 123 spellings) wearing a different coat. The runbook quotes
@@ -92,25 +111,31 @@ work must be **a class**, not a file.
 
 ## 4. Phases
 
-### Phase 0 — Instrument and gate *(prerequisite for everything)*
+### Phase 0 — Instrument and gate — **DONE**
 
-The gap is currently invisible: no tracked number, so no way to show progress to #821 and
-no way to stop regression. Ship `tools/langmode_audit.py` reporting, as JSON and a one-line
-summary:
+`tools/langmode_audit.py` ships with this plan, and `langmode-baseline.json` banks the
+starting point. It needs no compiler and no ROM, so it runs on a bare clone. It reports
+the populations above, the per-class backlog (`--by-class`), work lists (`--list`), and
+the named exclusions.
 
-- mangled-symbol files by extension and by symbol kind
-- files with a local struct body / no project include / `char pad[` layout
-- inline-`asm` and codegen-hack counts
-- the `Fix12<int>` exclusion list, named
+`--check langmode-baseline.json` is the **CI ratchet**: every metric is a defect count, so
+it may fall and never rise; the gate has been tested against a deliberately planted
+regression and fails closed. The headline metric is `unmigrated_total`, which cannot be
+gamed by renaming a `.c` to `.cpp` — a hand-spelled symbol counts however the file is
+named. That property is the whole reason this phase came first: it makes the *easy* fake
+progress unrewarding, and it turns the reply to #821 into a number instead of an argument.
 
-Wire it into CI as a **ratchet**: the counts may fall, never rise. This alone answers #821
-with a number instead of an argument, and turns "we're working on it" into a chart.
+Remaining, and the natural next commit: wire `--check` into CI, and re-bank the baseline
+in any commit that legitimately lowers a count.
 
-Cost: small. Risk: none — no `src/` change.
+### Phase 1 — SDK namespaces *(169 files, 37 namespaces) — zero layout risk*
 
-### Phase 1 — SDK namespaces *(174 files, 33 namespaces) — zero layout risk*
+37 of the mangled-name prefixes have no `include/<Name>.h` **and no ctor/dtor**, which
+together mean they are namespaces rather than classes. Both halves matter: a missing
+header alone proves nothing, since `Chuckya` has a `D0`/`D1` and therefore a vtable and a
+layout whether a header exists or not. `langmode_audit.py` reports this set as
+`layout_free`; do not widen it by eye.
 
-33 of the mangled-name prefixes have no `include/<Name>.h` because they are not classes.
 `_ZN2GX10EndLoadTexEv` is `GX::EndLoadTex()` — no `this`, no vtable, no struct, no
 includers. The migration is a language-mode flip and nothing else:
 
@@ -120,44 +145,54 @@ includers. The migration is a language-mode flip and nothing else:
 namespace GX { void EndLoadTex() { /* body unchanged */ } }
 ```
 
-Largest prefixes: `GX` 18, `Sound` 17, `CP15` 16, `cstd` 14, `IRQ` 10, `G2S` 8, `GXS` 8.
+Largest prefixes: `GX` 18, `CP15` 16, `Sound` 15, `cstd` 11, `IRQ` 9, `G2S` 8, `GXS` 8.
 
-This phase proves the pipeline (audit → migrate → byte-verify → ratchet) at the smallest
-possible blast radius, and retires 17% of the backlog without touching one header.
+This phase proves the pipeline (audit → migrate → byte-verify → re-bank) at the smallest
+possible blast radius, and retires 12% of the backlog without touching one header.
 Do it first for that reason, not because it is the biggest.
 
-### Phase 2 — Destructors, class-at-a-time *(431 files)*
+### Phase 2 — Destructors, class-at-a-time *(463 files: 258 `D0`, 188 `D1`, 17 `D2`)*
 
-Proven pattern, largest single block, real header discipline required. Per §3.1 a slice
-is a class, and `D0`/`D1`/`D2` for one class ship together — they share the vtable write
-and the base-subobject call, so splitting them across commits means verifying the same
-layout hypothesis three times.
+Largest single block, real header discipline required. Per §3.1 a slice is a class, and
+`D0`/`D1`/`D2` for one class ship together — they share the vtable write and the
+base-subobject call, so splitting them across commits means verifying the same layout
+hypothesis three times.
 
-Pilot targets — highest unmigrated count *and* an existing reconstructed header:
+**Only `D1` is properly proven** (72 landed). `D0` has 3 and `D2` none, so the first
+slices should be chosen to include all three variants and settle `D0`/`D2` early —
+`D0` additionally has to get `operator delete` right, which `D1` never exercises. If
+`D2` turns out to be blocked, that is a runbook §7 entry and 17 files leave the backlog.
 
-| class | `.c` left | header state |
+Pilot targets — highest unmigrated count *and* an existing reconstructed header
+(`--by-class` for the live table):
+
+| class | unmigrated | kinds |
 |---|---|---|
-| `Actor` | 56 | exists; 25 `unk_`, 12 `pad_` |
-| `Particle` | 23 | exists; 30 `unk_`, 21 `pad_` |
-| `Scene` | 17 | exists; largely named |
-| `Stage` | 15 | exists; 14 `unk_`, 12 `pad_` |
+| `Actor` | 65 | `C1:1 C2:1 D0:1 D1:1 D2:1 method:60` |
+| `Player` | 48 | `C1:1 C3:1 D0:1 D2:1 method:44` |
+| `Stage` | 25 | `C3:1 D0:1 D2:1 method:22` |
+| `Scene` | 23 | `D0:1 D1:1 D2:1 method:20` |
+| `Heap` | 19 | `C1:1 D0:1 D1:1 D2:1 method:15` |
 
-Start with **`Scene`**, not `Actor`. Its header is already mostly named, so the slice
-tests the *migration* rather than testing migration and field reconstruction at once.
-`Actor` is the prize (56 files, and it is the base of the actor hierarchy) but it is also
-the widest blast radius in the tree; take it third or fourth, once the procedure is boring.
+Start with **`Scene`**. Its header is already mostly named, so the slice tests the
+*migration* rather than migration plus field reconstruction at once, and it carries one of
+each dtor variant — exactly the `D0`/`D2` evidence Phase 2 is missing — without dragging in
+a constructor. `Actor` is the prize (65 files, base of the actor hierarchy) and also the
+widest blast radius in the tree: take it third or fourth, once the procedure is boring.
+Note that `Actor`, `Player`, `Stage` and `Heap` each carry a ctor variant, which is Phase 5
+research — split those files out of the slice rather than letting them block it.
 
 Heed the runbook's warning on the C side: a polymorphic class needs an explicit
 `void* vtable; /* 0x00 */` under `#else`, or every C includer's offsets shift by 4.
 
-### Phase 3 — Plain methods *(543 of 579; 36 excluded)*
+### Phase 3 — Plain methods *(842, less the 57 excluded)*
 
 Same slices, same classes, after that class's dtors are done. Includes converting raw
 mangled sibling calls into real calls where the callee now has a proper declaration —
 migration is per-reference, not only per-function, so this phase shrinks the declaration
 debt as a side effect.
 
-### Phase 4 — Retire shadow declarations *(770 files)*
+### Phase 4 — Retire shadow declarations *(1,641 files; 776 of them `.cpp`)*
 
 The phase that decides whether the critique actually stops being true. Point every
 shadow struct at the real header and delete the local copy. Byte-neutral in intent and
@@ -167,14 +202,19 @@ Sequenced after 2–3 because those phases keep adding to it until the class-sli
 discipline is habitual, and because a shadow struct whose class has no reconstructed
 header yet has nowhere to point.
 
-### Phase 5 — Constructors *(34 files) — timeboxed research spike*
+### Phase 5 — Constructors *(54 files: 41 `C1`, 11 `C2`, 2 `C3`) — timeboxed research spike*
 
-Zero landed, so this is research, not throughput. The open question is whether mwccarm's
-member-initializer-list and base-ctor codegen can be steered to the ROM's bytes at all,
-or whether `C1`/`C2` are a genuine dead end like by-value `Fix12<int>`. Spike on one
-already-understood class, measure across the sweep, and publish the answer **either way** —
+Zero migrated, ever, so this is research and not throughput. The open question is whether
+mwccarm's member-initializer-list and base-ctor codegen can be steered to the ROM's bytes
+at all, or whether the ctor variants are a genuine dead end like by-value `Fix12<int>`.
+
+`src/_ZN9ActorBaseC1Ev.cpp` is the warning: someone already reached for hand-written `asm`
+here and marked it `// NONMATCHING`. That is a fair summary of the difficulty, and it is
+also the natural spike subject, since its inheritance chain and callees are already known.
+
+Spike on one such class, measure across the sweep, and publish the answer **either way** —
 a documented dead end in runbook §7 is a real deliverable and stops the next contributor
-burning a week. Do not schedule the other 33 files until the spike returns.
+burning a week. Do not schedule the other 53 files until the spike returns.
 
 ### Phase 6 — Codegen hacks *(14 inline `asm`, 67 commented laundering)*
 
@@ -215,8 +255,9 @@ Inherits runbook §6, plus:
 | Header retype silently un-matches a non-enrolled includer | the `eligible.py` bracket; never `rombuild.py` alone |
 | Shadow structs make `affected_src.py` under-report | Phase 4; and §6 forbids new ones |
 | Phase 2 volume tempts file-at-a-time throughput | slice = class; the ratchet counts shadow files too, so quick wins show up as debt |
-| `Actor` blast radius (56 files + hierarchy base) | sequence it after two boring slices |
+| `Actor` blast radius (65 files + hierarchy base) | sequence it after two boring slices |
 | Ctor spike open-ends | timeboxed; a documented dead end is an accepted outcome |
+| Toolchain absent, so nothing is verifiable | §10; Phase 0 was scoped to need neither compiler nor ROM |
 
 ## 8. On answering #821
 
@@ -229,32 +270,41 @@ is stronger when it says so plainly and shows the ratchet.
 
 ## 9. Reproducing every number above
 
+Every figure in §1–§4 except the declaration debt is `tools/langmode_audit.py` output:
+
 ```sh
-# mangled-symbol files by extension
-git ls-files | grep -cE '^src/.*/_Z[^/]*\.c$|^src/_Z[^/]*\.c$'      # 1044
-git ls-files | grep -cE '^src/.*/_Z[^/]*\.cpp$|^src/_Z[^/]*\.cpp$'  # 1471
+python tools/langmode_audit.py                    # the summary quoted in section 2
+python tools/langmode_audit.py --by-class         # the pilot-target table in phase 2
+python tools/langmode_audit.py --check langmode-baseline.json    # the CI ratchet
+```
 
-# language mode overall
-git ls-files | grep -cE '^src/.*\.c$'                                # 8125
-git ls-files | grep -cE '^src/.*\.cpp$'                              # 3127
+The declaration debt is the runbook's own pair, **43,931 lines across 8,950 files** at
+`7b293af4` (the runbook still says 43,922/8,948; re-measure rather than cite):
 
-# landed real C++ definitions
-grep -rlE '^\s*[A-Za-z_][A-Za-z0-9_]*::~[A-Za-z_]' src --include=*.cpp | wc -l   # 79
-
-# shadow declarations
-grep -rlE '^\s*(struct|class)\s+\w+\s*(:[^;{]*)?\{' src --include=*.cpp | wc -l  # 1426
-grep -rlE 'char\s+pad\[0x' src --include=*.c --include=*.cpp | wc -l             # 690
-
-# codegen hacks
-grep -rlE '__asm|asm[[:space:]]*[({]' src --include=*.c --include=*.cpp | wc -l  # 14
-grep -rliE 'launder|force.*(reg|codegen)' src --include=*.c --include=*.cpp | wc -l  # 67
-
-# declaration debt (runbook §1) -- 43931 lines / 8950 files at 7b293af4
+```sh
 git grep -h -cE "^\s*extern " -- 'src/*' | awk '{s+=$1} END{print s}'
 git grep -lE  "^\s*extern " -- 'src/*' | wc -l
 ```
 
-Symbol-kind and per-class breakdowns come from `tools/langmode_audit.py` (Phase 0); until
-it lands, the ad-hoc script in the session that wrote this plan is reproduced by matching
-`(C1|C2|D0|D1|D2)Ev?$` against each mangled basename and the leading `_ZN(\d+)(\w+)`
-length-prefixed class name.
+Do not hand-roll the language-mode counts from file extensions. That is exactly how the
+first draft of this plan reported 1,044 instead of 1,359 and called `D0` proven on the
+strength of 15 files that turned out to be 3: an extension is not a migration, and a
+`// NONMATCHING` draft is not proof of anything.
+
+## 10. Two prerequisites this working copy does not have
+
+Phase 0 was built to need neither, but **every later phase is blocked** until both are
+present, because nothing can be byte-verified without them:
+
+| missing | needed for | how to get it |
+|---|---|---|
+| `tools/mwccarm/2004/b56/` | the only verdict the build honours — `rombuild.py`, `build_pin.verify` | `notes/setup-mwccarm.md` |
+| `tools/bin/dsd.exe` | `rombuild.py` delink/link/rom phases | `notes/rom-build.md`, ds-decomp 0.11.0 |
+
+24 of the 25 sweep compilers can be on disk and the build still cannot be trusted: the pin
+is `2004/b56` (`rombuild.VERSION`), the linker is `1.2/sp2p3`, and `match.py`'s `CANONICAL`
+is `2004/b56` too. A sweep hit under any other version is iteration, never a verdict —
+runbook §5 says so explicitly.
+
+`notes/setup-mwccarm.md` predates the `2004/b56` pin (#1000) and still presents `1.2`/`2.0`
+as the whole set. It should be corrected by whoever sources that compiler.
