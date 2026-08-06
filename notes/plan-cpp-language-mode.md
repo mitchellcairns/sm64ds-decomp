@@ -120,7 +120,9 @@ the named exclusions.
 
 `--check langmode-baseline.json` is the **CI ratchet**: every metric is a defect count, so
 it may fall and never rise; the gate has been tested against a deliberately planted
-regression and fails closed. The headline metric is `unmigrated_total`, which cannot be
+regression and fails closed. The banked baseline holds only the metrics `--check` reads
+(67 lines), so re-banking after a slice stays a readable diff; `--full` dumps the
+per-class detail and file lists for humans. The headline metric is `unmigrated_total`, which cannot be
 gamed by renaming a `.c` to `.cpp` — a hand-spelled symbol counts however the file is
 named. That property is the whole reason this phase came first: it makes the *easy* fake
 progress unrewarding, and it turns the reply to #821 into a number instead of an argument.

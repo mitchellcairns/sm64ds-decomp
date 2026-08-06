@@ -42,9 +42,11 @@ Usage:
     python tools/langmode_audit.py --list excluded    # the un-migratable ones
 
     # CI ratchet: counts may fall, never rise. The baseline lives at the repo root
-    # because progress/ is gitignored and CI needs a committed reference point.
+    # because progress/ is gitignored and CI needs a committed reference point. It holds
+    # only the metrics --check reads, so re-banking it stays a small diff.
     python tools/langmode_audit.py --json langmode-baseline.json    # re-bank after work
     python tools/langmode_audit.py --check langmode-baseline.json   # exit 1 if worse
+    python tools/langmode_audit.py --json out.json --full           # + per-class, lists
 """
 import argparse
 import json
@@ -343,6 +345,8 @@ def main():
     ap.add_argument("--json", metavar="PATH", help="write the full report as JSON")
     ap.add_argument("--check", metavar="PATH",
                     help="compare against a banked report; exit 1 if any count rose")
+    ap.add_argument("--full", action="store_true",
+                    help="with --json: include per-class detail and file lists")
     ap.add_argument("--by-class", action="store_true",
                     help="per-class backlog, worst first")
     ap.add_argument("--list", metavar="WHICH", choices=["c-mangled", "cpp-handspelled", "excluded"],
@@ -365,8 +369,17 @@ def main():
         p = pathlib.Path(args.json)
         p.parent.mkdir(parents=True, exist_ok=True)
         banked = {k: v for k, v in r.items() if k != "_lists"}
+        if not args.full:
+            # The committed baseline carries only what --check reads. per_class is ~2,950
+            # lines and the ratchet never looks at it, so banking it would make every
+            # legitimate improvement a 3,000-line diff. --full when you want the lot.
+            banked.pop("per_class", None)
+            banked.get("exclusions", {}).pop("files", None)
+            banked["_note"] = ("ratchet baseline; regenerate with "
+                              "`python tools/langmode_audit.py --json <this file>`. "
+                              "Use --full for per-class detail and file lists.")
         p.write_text(json.dumps(banked, indent=2, sort_keys=True) + "\n")
-        print(f"wrote {args.json}")
+        print(f"wrote {args.json}" + ("" if args.full else " (ratchet metrics only)"))
 
     if args.check:
         old = json.loads(pathlib.Path(args.check).read_text())
